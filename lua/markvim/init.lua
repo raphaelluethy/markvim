@@ -71,6 +71,14 @@ function M.render(buf)
   return require('markvim.render').render(bufnr(buf), true)
 end
 
+---Open the diagram under the cursor (or at `row`, 0-based) in a floating panel.
+---@param buf integer|nil
+---@param row integer|nil
+---@return boolean opened
+function M.open_diagram(buf, row)
+  return require('markvim.diagram').open_at(bufnr(buf), row)
+end
+
 ---Current mode of an attached buffer ('live' | 'preview' | 'split'), or nil.
 ---@param buf integer|nil
 ---@return string|nil

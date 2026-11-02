@@ -103,8 +103,10 @@ plugin loads. Both are optional. Defaults: >lua
     link = { enabled = true, icons = false },
     inline = { enabled = true, html = false, hard_break = false },
     html = { enabled = true, comments = true },
-    diagram = { enabled = true, backend = 'auto', hide_source = true,
-                max_height = 30, timeout = 20000, languages = { ... },
+    diagram = { enabled = true, backend = 'text', hide_source = true,
+                max_height = 40, overflow = 'panel', keys = { open = '<CR>' },
+                text = { padding_x = 3, padding_y = 2, box_padding = 0 },
+                timeout = 20000, languages = { ... },
                 cache_dir = nil },
     image = { backend = 'auto', cell = { width = 9, height = 18 } },
     on_attach = nil,
@@ -158,6 +160,14 @@ asynchronously, and cached on disk (`diagram.cache_dir`). The rendering is
 shown as virtual lines; the source is hidden (`diagram.hide_source`) and
 revealed while the cursor is inside the block in live mode.
 
+Art taller than `diagram.max_height` or wider than the window is replaced by
+a one-line placeholder when `diagram.overflow = 'panel'`; `<CR>` on it (or
+on the block, `diagram.keys.open`) and `:Markvim open` show the art in a
+floating panel: a panels.nvim panel (native float, or a Rex layer inside
+Rex) when that plugin is installed, else a plain float (`q` closes).
+`require('markvim').open_diagram({buf}, {row})` does the same from Lua.
+`diagram.text` sets the spacing of beautiful-mermaid art.
+
 Backend `'auto'` uses images when the terminal supports the kitty graphics
 protocol with Unicode placeholders (kitty, Ghostty, iTerm2) and text
 otherwise. `MARKVIM_IMAGES=1|0` overrides detection.
@@ -199,6 +209,9 @@ require('markvim').render({buf})                              *markvim.render()*
 require('markvim').is_attached({buf})                    *markvim.is_attached()*
 require('markvim').mode({buf})                                  *markvim.mode()*
     Mode of an attached buffer ('live', 'preview' or 'split'), or nil.
+require('markvim').open_diagram({buf}, {row})          *markvim.open_diagram()*
+    Open the text diagram at {row} (default: cursor row) in a floating panel.
+
 require('markvim').render_lines({lines}, {opts})        *markvim.render_lines()*
     Put {lines} into a scratch buffer (or `opts.buf`), set
     `vim.b.markvim_mode = opts.mode or 'preview'` and `filetype=markdown`.

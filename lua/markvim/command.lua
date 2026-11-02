@@ -2,7 +2,7 @@ local api = vim.api
 local M = {}
 
 local subcommands =
-  { 'toggle', 'enable', 'disable', 'live', 'preview', 'split', 'render', 'debug', 'install', 'health' }
+  { 'toggle', 'enable', 'disable', 'live', 'preview', 'split', 'render', 'open', 'debug', 'install', 'health' }
 
 ---@param cmd vim.api.keyset.create_user_command.command_args
 function M.run(cmd)
@@ -32,6 +32,10 @@ function M.run(cmd)
     end
   elseif sub == 'render' then
     mv.render(buf)
+  elseif sub == 'open' then
+    if not mv.open_diagram(buf) then
+      vim.notify('markvim: no diagram under the cursor', vim.log.levels.INFO)
+    end
   elseif sub == 'debug' then
     require('markvim.debug').show(buf)
   elseif sub == 'install' then

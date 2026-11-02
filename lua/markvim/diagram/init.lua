@@ -5,6 +5,7 @@ local api = vim.api
 local uv = vim.uv
 local config = require('markvim.config')
 local renderers = require('markvim.diagram.renderers')
+local state = require('markvim.state')
 local util = require('markvim.util')
 
 local M = {}
@@ -27,8 +28,20 @@ local waiting = {}
 local running = 0
 local queue = {}
 
-local root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, 'S').source:sub(2))))
+-- lua/markvim/diagram/init.lua -> plugin root (four levels up).
+local root = vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(vim.fs.dirname(debug.getinfo(1, 'S').source:sub(2)))))
 local script = root .. '/scripts/mermaid.mjs'
+
+---The most telling line of a renderer's stderr: Node prints its stack frame
+---first and the message later, so prefer a line mentioning an error.
+local function error_line(msg)
+  for line in msg:gmatch('[^\n]+') do
+    if line:find('[Ee]rror') or line:find('[Ff]ail') then
+      return line:gsub('^%s+', '')
+    end
+  end
+  return msg:match('[^\n]+') or msg
+end
 
 local function node_prefix()
   return vim.fn.stdpath('data') .. '/markvim'
@@ -180,14 +193,14 @@ local function run(key, spec, opts, entry, out_base)
         if res.code ~= 0 then
           local msg = (res.stderr or ''):gsub('%s+$', '')
           msg = msg ~= '' and msg or ('exit code ' .. res.code)
-          return done(msg:match('[^\n]+') or msg)
+          return done(error_line(msg))
         end
         if spec.post then
           local post_ok, post_err = pcall(function()
             vim.system(spec.post(opts), sysopts(res.stdout, false), function(res2)
               if res2.code ~= 0 then
                 local msg = (res2.stderr or ''):gsub('%s+$', '')
-                return done(msg:match('[^\n]+') or ('exit code ' .. res2.code))
+                return done(msg ~= '' and error_line(msg) or ('exit code ' .. res2.code))
               end
               collect(res2.stdout)
             end)
@@ -229,6 +242,7 @@ function M.get(spec, src, ctx, width)
     dark and 'd' or 'l',
     ascii and 'a' or 'u',
     spec.kind == 'text' and tostring(width) or '',
+    spec.kind == 'text' and vim.json.encode(ctx.cfg.diagram.text or {}) or '',
     src,
   }, '\0')
   local key = vim.fn.sha256(key_src):sub(1, 24)
@@ -273,6 +287,7 @@ function M.get(spec, src, ctx, width)
     ascii = ascii,
     script = script,
     node_prefix = node_prefix(),
+    text = ctx.cfg.diagram.text,
   }
   queue[#queue + 1] = function()
     run(key, spec, opts, entry, out_base)
@@ -288,7 +303,7 @@ local function backend(cfg)
   if b == 'none' then
     return nil
   end
-  if b == 'auto' then
+  if b == 'auto' or b == 'image' then
     return require('markvim.image').available() and 'image' or 'text'
   end
   return b
@@ -354,12 +369,33 @@ function M.render_block(ctx, node, lang, rows)
     local pad = (' '):rep(indent)
     virt = {}
     local max = cfg.max_height
-    for i, l in ipairs(entry.lines) do
-      if i > max then
-        virt[#virt + 1] = { { pad .. ('… %d more lines'):format(#entry.lines - max), 'MarkvimDiagramPending' } }
-        break
+    local art_w = 0
+    for _, l in ipairs(entry.lines) do
+      local w = api.nvim_strwidth(l)
+      if w > art_w then
+        art_w = w
       end
-      virt[#virt + 1] = { { pad .. l, hl } }
+    end
+    local block = { top = rows.top, bottom = rows.bottom, lang = lang, entry = entry }
+    ctx.diagrams[#ctx.diagrams + 1] = block
+    if cfg.overflow == 'panel' and (#entry.lines > max or art_w > width) then
+      block.large = true
+      local key = cfg.keys and cfg.keys.open
+      local hint = key and (' · ' .. key .. ' to open') or ' · :Markvim open'
+      virt[1] = {
+        {
+          pad .. ctx.icons.diagram .. ('%s diagram, %d×%d'):format(lang, art_w, #entry.lines) .. hint,
+          'MarkvimDiagramPending',
+        },
+      }
+    else
+      for i, l in ipairs(entry.lines) do
+        if i > max then
+          virt[#virt + 1] = { { pad .. ('… %d more lines'):format(#entry.lines - max), 'MarkvimDiagramPending' } }
+          break
+        end
+        virt[#virt + 1] = { { pad .. l, hl } }
+      end
     end
   else
     virt = require('markvim.image').virt_lines(entry, { width = width, max_height = cfg.max_height, indent = indent })
@@ -401,6 +437,81 @@ function M.render_block(ctx, node, lang, rows)
   end
   ctx.fix(anchor, 0, { virt_lines = virt, virt_lines_above = above })
   return hide
+end
+
+---Fallback panel when panels.nvim is not installed: a plain float.
+local function fallback_panel(title, lines)
+  local buf = api.nvim_create_buf(false, true)
+  api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].bufhidden = 'wipe'
+  local cols, rows = vim.o.columns, vim.o.lines - vim.o.cmdheight
+  local width, height = math.floor(cols * 0.9), math.floor(rows * 0.9)
+  local win = api.nvim_open_win(buf, true, {
+    relative = 'editor',
+    width = width,
+    height = height,
+    row = math.floor((rows - height) / 2) - 1,
+    col = math.floor((cols - width) / 2),
+    style = 'minimal',
+    border = 'rounded',
+    title = ' ' .. title .. ' ',
+    title_pos = 'center',
+  })
+  vim.wo[win].wrap = false
+  for _, lhs in ipairs({ 'q', '<Esc>' }) do
+    vim.keymap.set('n', lhs, function()
+      pcall(api.nvim_win_close, win, true)
+    end, { buffer = buf, nowait = true })
+  end
+  return { buf = buf, win = win }
+end
+
+---Open the rendered art of a diagram in a floating panel (panels.nvim when
+---installed, else a plain float).
+---@param buf integer
+---@param block {lang: string, entry: table}
+function M.open(buf, block)
+  local s = state.get(buf)
+  local entry = block.entry
+  if entry.kind ~= 'text' or not entry.lines then
+    return vim.notify('markvim: only text diagrams can be opened in a panel', vim.log.levels.INFO)
+  end
+  local title = block.lang .. ' diagram'
+  local ok, panels = pcall(require, 'panels')
+  if ok then
+    if s and s.panel and (s.panel.layer_id or (s.panel.buf and api.nvim_buf_is_valid(s.panel.buf))) then
+      s.panel.opts.title = title
+      s.panel:set_lines(entry.lines)
+      s.panel:show({ focus = true })
+      return s.panel
+    end
+    local panel = panels.open({ title = title, lines = entry.lines, label = 'markvim', wrap = false })
+    if s then
+      s.panel = panel
+    end
+    return panel
+  end
+  return fallback_panel(title, entry.lines)
+end
+
+---Open the diagram at a row (the block itself or its neighbouring rows).
+---@param buf integer
+---@param row integer|nil 0-based; defaults to the cursor row
+---@return boolean opened
+function M.open_at(buf, row)
+  local s = state.get(buf)
+  if not s then
+    return false
+  end
+  row = row or (api.nvim_win_get_cursor(0)[1] - 1)
+  for _, block in ipairs(s.diagram_blocks or {}) do
+    if row >= block.top - 1 and row <= block.bottom + 1 then
+      M.open(buf, block)
+      return true
+    end
+  end
+  return false
 end
 
 ---Install node based renderers (pele, beautiful-mermaid) into stdpath('data').

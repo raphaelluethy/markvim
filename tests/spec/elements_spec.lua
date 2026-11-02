@@ -170,6 +170,38 @@ describe('rules and html', function()
 end)
 
 describe('diagrams', function()
+  it('replaces oversized art with a placeholder and opens it in a panel', function()
+    local diagram = require('markvim.diagram')
+    diagram.clear()
+    require('markvim.config').setup({
+      diagram = { languages = { fake = { text = { 'echo' }, image = {} } }, backend = 'text', max_height = 2 },
+    })
+    local buf = H.buffer({ 'before', '```fake', 'A', 'B', 'C ' .. vim.uv.hrtime(), '```', 'after', 'far away' })
+    vim.wait(2000, function()
+      return H.has(buf, 0, { lines = 1 }, true)
+    end, 20)
+    ok(H.has(buf, 0, { lines = 1, above = false }, true), 'one placeholder line')
+    local marks = vim.api.nvim_buf_get_extmarks(
+      buf,
+      require('markvim.state').get(buf).views[1].ns_fixed,
+      { 0, 0 },
+      { 0, -1 },
+      { details = true }
+    )
+    ok(marks[1][4].virt_lines[1][1][1]:find('fake diagram, %d+×3'), 'placeholder text')
+    local blocks = require('markvim.state').get(buf).diagram_blocks
+    eq(1, #blocks, 'diagram registered')
+    ok(blocks[1].large, 'marked large')
+    ok(not require('markvim').open_diagram(buf, 7), 'row away from the block does not open')
+    local before = #vim.api.nvim_tabpage_list_wins(0)
+    ok(require('markvim').open_diagram(buf, 2), 'opens')
+    eq(before + 1, #vim.api.nvim_tabpage_list_wins(0), 'a float was opened')
+    local fwin = vim.api.nvim_get_current_win()
+    eq('C', vim.api.nvim_buf_get_lines(0, 2, 3, false)[1]:sub(1, 1), 'art shown in the panel')
+    vim.api.nvim_win_close(fwin, true)
+    require('markvim.config').setup({})
+    H.cleanup()
+  end)
   it('renders text art asynchronously and hides the source', function()
     local diagram = require('markvim.diagram')
     diagram.clear()

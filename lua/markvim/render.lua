@@ -147,6 +147,7 @@ local function new_ctx(buf, s, cfg, width)
     blocks = {},
     raw_blocks = {},
     hidden = {},
+    diagrams = {},
     count = 0,
   }
   local lines, base = {}, 0
@@ -523,6 +524,7 @@ function M.render(buf, force)
   end
   local t3 = util.now()
   s.rendered = { ranges = padded, tick = tick }
+  s.diagram_blocks = ctx.diagrams
   s.stats = {
     viewport_ms = t1 - t0,
     compute_ms = t2 - t1,
@@ -870,6 +872,16 @@ function M.attach(buf)
   })
 
   M.set_mode(buf, mode)
+  local open_key = cfg.diagram.enabled and cfg.diagram.keys and cfg.diagram.keys.open
+  if open_key and not s.float and vim.bo[buf].buftype == '' then
+    vim.keymap.set('n', open_key, function()
+      if not require('markvim.diagram').open_at(buf) then
+        -- Not on a diagram: do what the key normally does.
+        api.nvim_feedkeys(vim.keycode(open_key), 'n', false)
+      end
+    end, { buffer = buf, desc = 'markvim: open diagram in a panel' })
+    s.open_key = open_key
+  end
   if type(cfg.on_attach) == 'function' then
     cfg.on_attach(buf)
   end
@@ -885,6 +897,12 @@ function M.detach(buf)
   close_split(buf, s)
   clear_all(buf, s)
   restore_win_options(s)
+  if s.open_key then
+    pcall(vim.keymap.del, 'n', s.open_key, { buffer = buf })
+  end
+  if s.panel then
+    pcall(s.panel.close, s.panel)
+  end
   pcall(api.nvim_del_augroup_by_name, 'markvim.buf.' .. buf)
   state.remove(buf)
 end

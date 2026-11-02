@@ -30,16 +30,53 @@ try {
 }
 const source = readFileSync(0, 'utf8');
 
+// Entry file of a package under `base/node_modules`. Reads package.json
+// ourselves: `require.resolve` fails on ESM-only packages whose "exports" has
+// no "require" condition (beautiful-mermaid, pele).
+function resolveEntry(base, name) {
+  const dir = path.join(base, 'node_modules', name);
+  let pkg;
+  try {
+    pkg = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
+  } catch {
+    return null;
+  }
+  const pick = (e) => {
+    if (typeof e === 'string') return e;
+    if (Array.isArray(e)) {
+      for (const x of e) {
+        const r = pick(x);
+        if (r) return r;
+      }
+      return null;
+    }
+    if (e && typeof e === 'object') {
+      for (const k of ['import', 'module', 'node', 'default', 'require']) {
+        if (k in e) {
+          const r = pick(e[k]);
+          if (r) return r;
+        }
+      }
+    }
+    return null;
+  };
+  let exp = pkg.exports;
+  if (exp && typeof exp === 'object' && !Array.isArray(exp) && '.' in exp) exp = exp['.'];
+  const rel = pick(exp) || pkg.module || pkg.main || 'index.js';
+  return path.join(dir, rel);
+}
+
 async function load(name) {
   const prefix = process.env.MARKVIM_NODE_PREFIX;
-  const base = prefix ? path.join(prefix, 'node_modules', path.sep) : path.join(process.cwd(), path.sep);
-  const require = createRequire(base);
-  let resolved;
-  try {
-    resolved = require.resolve(name);
-  } catch {
-    process.stderr.write(`package "${name}" not found; run :Markvim install node (or npm install ${name})\n`);
-    process.exit(2);
+  const base = prefix || process.cwd();
+  let resolved = resolveEntry(base, name);
+  if (!resolved) {
+    try {
+      resolved = createRequire(path.join(base, path.sep)).resolve(name);
+    } catch {
+      process.stderr.write(`package "${name}" not found; run :Markvim install node (or npm install ${name})\n`);
+      process.exit(2);
+    }
   }
   return import(pathToFileURL(resolved).href);
 }
@@ -63,9 +100,13 @@ try {
       const svg = mod.renderMermaidSVG(source, { bg, fg, transparent: bg === 'transparent' });
       process.stdout.write(svg);
     } else {
+      const pad = options.padding || {};
       const text = mod.renderMermaidASCII(source, {
         useAscii: format === 'ascii',
         colorMode: 'none',
+        ...(pad.x != null ? { paddingX: pad.x } : {}),
+        ...(pad.y != null ? { paddingY: pad.y } : {}),
+        ...(pad.box != null ? { boxBorderPadding: pad.box } : {}),
         ...(options.maxWidth ? { maxWidth: options.maxWidth } : {}),
       });
       process.stdout.write(text.endsWith('\n') ? text : text + '\n');

@@ -78,7 +78,10 @@ M.register({
       o.script,
       'beautiful-mermaid',
       o.ascii and 'ascii' or 'unicode',
-      vim.json.encode({ maxWidth = o.width }),
+      vim.json.encode({
+        maxWidth = o.width,
+        padding = o.text and { x = o.text.padding_x, y = o.text.padding_y, box = o.text.box_padding } or nil,
+      }),
     }
   end,
 })

@@ -23,6 +23,9 @@
 ---@field win_opts table<integer, table> saved window options
 ---@field stats table
 ---@field diagrams table<string, boolean> pending diagram keys
+---@field diagram_blocks table[]|nil text diagrams in the last render ({top, bottom, lang, entry, large})
+---@field panel table|nil panels.nvim panel showing a diagram
+---@field open_key string|nil buffer-local key that opens diagrams
 
 local M = {}
 

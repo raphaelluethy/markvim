@@ -61,13 +61,14 @@ pipeline and the image backend load only when they are first needed.
 | `:Markvim preview` | preview mode; again to go back to live |
 | `:Markvim split` | split mode; again (or close the window) to go back |
 | `:Markvim render` | force a re-render |
+| `:Markvim open` | open the diagram under the cursor in a floating panel (also `<CR>`) |
 | `:Markvim debug` | timings of the last render and marks under the cursor |
 | `:Markvim install node` | install the Node based mermaid renderers (`pele`, `beautiful-mermaid`) |
 | `:checkhealth markvim` | parsers, renderers, terminal image support |
 
 Lua API (`require('markvim')`): `setup(opts)`, `attach(buf)`, `detach(buf)`,
 `enable(buf)`, `disable(buf)`, `toggle(buf)`, `set_mode('live'|'preview'|'split', buf)`,
-`render(buf)`, `is_attached(buf)`, `mode(buf)`, and `render_lines(lines, {mode=})` which
+`render(buf)`, `is_attached(buf)`, `mode(buf)`, `open_diagram(buf, row)`, and `render_lines(lines, {mode=})` which
 renders arbitrary markdown into a scratch buffer you can show in any window —
 handy for chat UIs, custom hovers or documentation popups.
 
@@ -114,9 +115,12 @@ require('markvim').setup({
   html = { enabled = true, comments = true },
   diagram = {
     enabled = true,
-    backend = 'auto',        -- 'auto' | 'text' | 'image' | 'none'
+    backend = 'text',        -- 'text' | 'image' (falls back to text) | 'none'
     hide_source = true,      -- show only the rendering; cursor inside reveals the source
-    max_height = 30,
+    max_height = 40,         -- taller/wider art: see overflow
+    overflow = 'panel',      -- 'panel': placeholder + floating panel (<CR>) | 'truncate'
+    keys = { open = '<CR>' },-- opens the diagram under the cursor in a panel; false disables
+    text = { padding_x = 3, padding_y = 2, box_padding = 0 }, -- beautiful-mermaid spacing
     timeout = 20000,
     languages = {
       mermaid  = { text = { 'beautiful-mermaid', 'mermaid-ascii' }, image = { 'pele', 'mmdc' } },

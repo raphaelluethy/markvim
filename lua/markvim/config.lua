@@ -120,13 +120,24 @@ local defaults = {
   },
   diagram = {
     enabled = true,
-    -- 'auto': images when the terminal supports them, else text; 'text'; 'image'; 'none'.
-    backend = 'auto',
+    -- 'text': ASCII/Unicode art (default); 'image': kitty graphics when the
+    -- terminal supports them, else text; 'auto': same as 'image'; 'none'.
+    backend = 'text',
     -- Hide the diagram source when a rendering is available. In live mode the
     -- source shows again when the cursor is inside the block.
     hide_source = true,
-    -- Max rows a rendered diagram may use (images are scaled down to fit).
-    max_height = 30,
+    -- Max rows a rendered diagram may use inline (images are scaled down to fit).
+    max_height = 40,
+    -- Text art taller than max_height or wider than the window: 'panel' shows a
+    -- one-line placeholder and opens the art in a floating panel (panels.nvim
+    -- when installed, else a plain float) with `keys.open` or `:Markvim open`;
+    -- 'truncate' shows the first max_height rows inline.
+    overflow = 'panel',
+    -- Normal-mode key (buffer-local in markdown files) that opens the diagram
+    -- under the cursor in a panel. false disables.
+    keys = { open = '<CR>' },
+    -- Spacing of text renderers that support it (beautiful-mermaid).
+    text = { padding_x = 3, padding_y = 2, box_padding = 0 },
     -- Milliseconds before a renderer is killed.
     timeout = 20000,
     -- Renderers per code block language. Each entry is a list of renderer names
