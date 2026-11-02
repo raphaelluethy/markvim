@@ -1,0 +1,251 @@
+*markvim.txt*          Fast in-buffer markdown rendering for Neovim 0.12+
+
+==============================================================================
+CONTENTS                                                     *markvim-contents*
+
+  1. Introduction ............................... |markvim-introduction|
+  2. Modes ...................................... |markvim-modes|
+  3. Commands ................................... |markvim-commands|
+  4. Configuration .............................. |markvim-config|
+  5. Diagrams ................................... |markvim-diagrams|
+  6. Floating windows / LSP hover ............... |markvim-hover|
+  7. Lua API .................................... |markvim-api|
+  8. Highlight groups ........................... |markvim-highlights|
+  9. Performance ................................ |markvim-performance|
+
+==============================================================================
+1. INTRODUCTION                                          *markvim-introduction*
+
+markvim renders markdown inside the buffer with extmarks: headings, code
+blocks, lists, checkboxes, quotes, callouts, tables, rules, links, inline
+markup, HTML comments and diagrams (Mermaid/Pele, PlantUML, D2, Graphviz as
+text art or terminal images). It attaches to every buffer with a configured
+filetype (default `markdown`), which includes LSP hover floats.
+
+Requires Neovim 0.12 with the bundled `markdown` and `markdown_inline`
+treesitter parsers. Highlight groups link to your colorscheme.
+
+==============================================================================
+2. MODES                                                        *markvim-modes*
+
+live                                                       *markvim-mode-live*
+    Everything is rendered except the cursor line, which shows the raw
+    markdown (also in insert mode). Backgrounds and virtual lines stay.
+    `live.context = 'block'` reveals the whole code block/table/diagram the
+    cursor is in instead of one line. Diagram sources always reveal as a
+    block.
+
+preview                                                 *markvim-mode-preview*
+    Everything is rendered, including the cursor line (`concealcursor=nvic`).
+    Default for floating windows (`float_mode`).
+
+split                                                     *markvim-mode-split*
+    Opens a second window on the SAME buffer next to the current one. The
+    original window shows raw text (or live rendering with
+    `split.edit = 'live'`), the new window shows the preview. Both scroll
+    together (`split.scrollbind`). Closing either window ends split mode.
+    Implemented with window-scoped namespaces (|nvim__ns_set()|), so there is
+    no mirror buffer to keep in sync.
+
+==============================================================================
+3. COMMANDS                                                  *markvim-commands*
+
+:Markvim [toggle]                                                    *:Markvim*
+    Toggle rendering for the current buffer.
+
+:Markvim enable | disable
+:Markvim live | preview | split
+    Switch mode. `preview` and `split` toggle back to `live` when repeated;
+    add `!` to force (`:Markvim! preview`).
+
+:Markvim render
+    Force a synchronous re-render of the visible area.
+
+:Markvim debug
+    Print mode, timings of the last render and the marks on the cursor row.
+
+:Markvim install node
+    Run `npm install` for the Node based mermaid renderers (`pele`,
+    `beautiful-mermaid`) into `stdpath('data')/markvim`.
+
+:checkhealth markvim
+    Parsers, available diagram renderers and terminal image support.
+
+==============================================================================
+4. CONFIGURATION                                               *markvim-config*
+
+Call `require('markvim').setup(opts)` or set `vim.g.markvim = opts` before the
+plugin loads. Both are optional. Defaults: >lua
+
+  {
+    enabled = true,
+    filetypes = { 'markdown' },
+    mode = 'live',                 -- 'live' | 'preview' | 'split'
+    float_mode = 'preview',        -- for floating windows
+    max_file_size = 4 * 1024 * 1024,
+    margin = 30,                   -- extra rows rendered around the viewport
+    debounce = { normal = 20, insert = 60 },
+    icons = 'nerd',                -- 'nerd' | 'unicode' | 'ascii'
+    live = { context = 'line' },   -- 'line' | 'block'
+    split = { position = 'right', size = 0.5, edit = 'raw', scrollbind = true },
+    win_options = { conceallevel = 3 },
+    heading = { enabled = true, position = 'inline', background = 'full',
+                icons = false, setext = true },
+    code = { enabled = true, border = 'hide', language = true,
+             language_icon = false, language_pos = 'right', left_pad = 0,
+             background = 'buffer', spacing = true, indented = true },
+    bullet = { enabled = true, icons = nil, ordered = true },
+    checkbox = { enabled = true, custom = { ['[-]'] = { icon = '󰥔', hl = 'MarkvimTodo' }, ... } },
+    quote = { enabled = true },
+    callout = { enabled = true },
+    table = { enabled = true, style = 'full', pad = true },
+    rule = { enabled = true },
+    link = { enabled = true, icons = false },
+    inline = { enabled = true, html = false, hard_break = false },
+    html = { enabled = true, comments = true },
+    diagram = { enabled = true, backend = 'auto', hide_source = true,
+                max_height = 30, timeout = 20000, languages = { ... },
+                cache_dir = nil },
+    image = { backend = 'auto', cell = { width = 9, height = 18 } },
+    on_attach = nil,
+  }
+<
+Notable options:
+
+heading.icons                                          *markvim-heading.icons*
+    `false` (default) hides the `#` markers and shows no icon; `true` uses
+    the icon set's heading icons; a list of six strings sets your own.
+    Links and code labels have the same switch: `link.icons` and
+    `code.language_icon` (both off by default).
+
+heading.position                                    *markvim-heading.position*
+    `'inline'` replaces the `#` markers with the icon; `'overlay'` draws the
+    icon over them (keeps indentation by level).
+
+heading.background                                *markvim-heading.background*
+    `'full'` highlights the whole line, `'block'` only the text, `false` off.
+
+code.border                                              *markvim-code.border*
+    `'hide'` hides fence lines (Neovim default behaviour), `'thin'` turns them
+    into a border carrying the language label, `'none'` leaves them alone.
+
+code.background                                      *markvim-code.background*
+    `'buffer'` (default) paints `MarkvimCode` behind code lines in normal
+    buffers but never in floating windows (LSP hovers), `'always'` paints it
+    everywhere, `'auto'` leaves it off only when a float contains nothing but
+    one code block, `false` never paints it. `MarkvimCode` is a faint tint of
+    the Normal foreground; `hi link MarkvimCode ColorColumn` for a stronger one.
+
+code.spacing                                            *markvim-code.spacing*
+    LSP hovers often put text directly after the closing fence. With
+    `spacing = true` (default) such a fence line is shown as an empty line
+    instead of being hidden, keeping the block visually separated.
+
+table.style                                              *markvim-table.style*
+    `'full'` adds top/bottom borders as virtual lines; `'normal'` only draws
+    the inner borders and does not shift lines.
+
+icons                                                          *markvim-icons*
+    `'nerd'` needs a Nerd Font. `'unicode'` uses plain Unicode symbols and
+    `'ascii'` keeps everything ASCII (headings keep their `#`).
+
+==============================================================================
+5. DIAGRAMS                                                  *markvim-diagrams*
+
+Fenced blocks whose language is a key of `diagram.languages` are rendered by
+the first available renderer listed for the backend (`text` or `image`),
+asynchronously, and cached on disk (`diagram.cache_dir`). The rendering is
+shown as virtual lines; the source is hidden (`diagram.hide_source`) and
+revealed while the cursor is inside the block in live mode.
+
+Backend `'auto'` uses images when the terminal supports the kitty graphics
+protocol with Unicode placeholders (kitty, Ghostty, iTerm2) and text
+otherwise. `MARKVIM_IMAGES=1|0` overrides detection.
+
+Built-in renderers (see `:checkhealth markvim`):
+
+  language           text                              image ~
+  mermaid, pele      beautiful-mermaid, mermaid-ascii  pele, mmdc
+  plantuml, puml     plantuml -tutxt                   plantuml -tpng
+  d2                 d2                                d2
+  dot, graphviz      graph-easy                        dot
+
+`pele` is Obsidian's Mermaid renderer (SVG), converted with `rsvg-convert` or
+`magick`. Register your own with
+`require('markvim.diagram').renderers.register(spec)`; see
+`lua/markvim/diagram/renderers.lua` for the spec fields.
+
+==============================================================================
+6. FLOATING WINDOWS / LSP HOVER                                 *markvim-hover*
+
+|vim.lsp.util.open_floating_preview()| gives its buffer `filetype=markdown`,
+so markvim attaches through |FileType| and renders synchronously before
+Neovim measures the float, using `float_mode`. This covers |vim.lsp.buf.hover()|,
+|vim.lsp.buf.signature_help()| and completion documentation windows that use
+the same helper. Buffers from other plugins can be rendered through
+|markvim.render_lines()| or by giving them `filetype=markdown`.
+
+==============================================================================
+7. LUA API                                                        *markvim-api*
+
+require('markvim').setup({opts})                               *markvim.setup()*
+require('markvim').attach({buf})                              *markvim.attach()*
+require('markvim').detach({buf})                              *markvim.detach()*
+require('markvim').enable({buf})                              *markvim.enable()*
+require('markvim').disable({buf})                            *markvim.disable()*
+require('markvim').toggle({buf})                              *markvim.toggle()*
+require('markvim').set_mode({mode}, {buf})                  *markvim.set_mode()*
+require('markvim').render({buf})                              *markvim.render()*
+require('markvim').is_attached({buf})                    *markvim.is_attached()*
+require('markvim').mode({buf})                                  *markvim.mode()*
+    Mode of an attached buffer ('live', 'preview' or 'split'), or nil.
+require('markvim').render_lines({lines}, {opts})        *markvim.render_lines()*
+    Put {lines} into a scratch buffer (or `opts.buf`), set
+    `vim.b.markvim_mode = opts.mode or 'preview'` and `filetype=markdown`.
+    Returns the buffer; show it in any window.
+
+`vim.b.markvim_mode`                                          *b:markvim_mode*
+    Set before the filetype is assigned to pick the mode for that buffer.
+
+==============================================================================
+8. HIGHLIGHT GROUPS                                        *markvim-highlights*
+
+All groups are defined with `default = true` links and can be overridden:
+
+  MarkvimH1..MarkvimH6         @markup.heading.N.markdown
+  MarkvimH1Bg..MarkvimH6Bg     heading foreground blended into Normal bg
+  MarkvimCode                  Normal fg tinted over Normal bg (8%)
+  MarkvimCodeInline            @markup.raw.markdown_inline
+  MarkvimCodeInfo              Comment
+  MarkvimCodeBorder            FloatBorder
+  MarkvimBullet/Ordered        @markup.list.markdown
+  MarkvimChecked/Unchecked     @markup.list.checked/unchecked.markdown
+  MarkvimTodo                  @markup.raw.markdown_inline
+  MarkvimQuote                 @markup.quote.markdown
+  MarkvimRule                  LineNr
+  MarkvimTable                 @punctuation.special.markdown
+  MarkvimTableHead             @markup.heading.markdown
+  MarkvimLink/Image            @markup.link.label.markdown_inline
+  MarkvimUrl                   @markup.link.url.markdown_inline
+  MarkvimStrike                @markup.strikethrough.markdown_inline
+  MarkvimMath                  @markup.math.markdown_inline
+  MarkvimHtml                  Comment
+  MarkvimDiagram               Normal
+  MarkvimDiagramPending        Comment
+  MarkvimDiagramError          DiagnosticError
+  MarkvimCallout{Note,Tip,Important,Warning,Caution,Question,Quote}
+                               Diagnostic* groups
+
+==============================================================================
+9. PERFORMANCE                                            *markvim-performance*
+
+Only the visible rows (plus `margin`) are parsed and decorated. Inline markup
+is parsed with a private `markdown_inline` tree restricted to the visible
+paragraphs. Marks are cached per row, so a cursor move in live mode only
+touches two rows. Text changes are debounced. Split mode renders the same
+buffer into a window-scoped namespace. Measured on a 17 500-line document:
+viewport render ~1.2 ms, cursor move ~0.1 ms, re-render after an edit ~1.8 ms
+(plus tree-sitter-markdown's own re-parse, which Neovim performs on redraw
+regardless). `:Markvim debug` shows the numbers for the current buffer.
+
+vim:tw=78:ts=8:ft=help:norl:
