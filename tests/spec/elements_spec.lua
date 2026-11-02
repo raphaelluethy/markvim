@@ -109,15 +109,22 @@ end)
 describe('tables', function()
   it('pads cells, replaces delimiter row and adds borders', function()
     local buf = H.buffer({ '| a | bbb |', '|---|:---:|', '| cc | d |' })
-    ok(H.has(buf, 0, { col = 0, text = '│', pos = 'overlay' }), 'pipe overlay')
-    ok(H.has(buf, 0, { col = 4, text = ' ', pos = 'inline' }), 'pad short header cell by 1')
+    ok(H.has(buf, 0, { col = 0, end_col = 2, conceal = '', text = '│ ', pos = 'inline' }), 'pipe replaced')
+    ok(
+      H.has(buf, 0, { col = 3, end_col = 6, conceal = '', text = '  │ ', pos = 'inline' }),
+      'formatter whitespace compacted and short header cell padded'
+    )
     ok(H.has(buf, 1, { col = 0, end_col = 11, conceal = '' }), 'delimiter row concealed')
     ok(
-      H.has(buf, 1, { col = 0, text = '├────┼─────┤', pos = 'inline' }),
+      H.has(
+        buf,
+        1,
+        { col = 0, end_col = 11, conceal = '', text = '├────┼─────┤', pos = 'inline' }
+      ),
       'delimiter row border'
     )
-    ok(H.has(buf, 2, { col = 6, text = ' ', pos = 'inline' }), 'center pad before')
-    ok(H.has(buf, 2, { col = 9, text = ' ', pos = 'inline' }), 'center pad after')
+    ok(H.has(buf, 2, { col = 4, text = ' │  ', pos = 'inline' }), 'center padding')
+    ok(H.has(buf, 2, { col = 8, text = '  │', pos = 'inline' }), 'center pad after')
     ok(H.has(buf, 0, { lines = 1, above = true }, true), 'top border')
     ok(H.has(buf, 2, { lines = 1 }, true), 'bottom border')
     H.cleanup()
@@ -125,8 +132,70 @@ describe('tables', function()
   it('accounts for concealed inline markup when padding', function()
     local buf = H.buffer({ '| **b** | x |', '|---|---|', '| a | y |' })
     -- column 1: '**b**' is 5 wide raw, 1 wide rendered -> ' b ' = 3 == ' a ' = 3 -> no padding
-    ok(not H.has(buf, 2, { col = 4, pos = 'inline' }), 'no padding needed')
+    ok(H.has(buf, 2, { col = 3, end_col = 6, conceal = '', text = ' │ ', pos = 'inline' }), 'no padding needed')
     ok(H.has(buf, 1, { text = '├───┼───┤' }))
+    H.cleanup()
+  end)
+  it('compacts formatter whitespace without changing content widths', function()
+    local buf = H.buffer({
+      '| Dimension                         | Question                         |',
+      '|-----------------------------------|----------------------------------|',
+      '| Clarity                           | Is scope clear?                  |',
+    })
+    ok(
+      H.has(
+        buf,
+        1,
+        { text = '├───────────┼─────────────────┤' }
+      ),
+      'border uses compact content widths'
+    )
+    ok(
+      H.has(buf, 0, { col = 11, end_col = 38, conceal = '', text = ' │ ', pos = 'inline' }),
+      'aligned source whitespace is replaced at the boundary'
+    )
+    H.cleanup()
+  end)
+  it('supports missing edge pipes and inline markup', function()
+    local buf = H.buffer({ 'Name      | Value', '----------|:-----:', '**alpha** | x' })
+    ok(H.has(buf, 0, { col = 4, end_col = 12, conceal = '', pos = 'inline' }), 'internal boundary replaced')
+    ok(
+      H.has(buf, 1, { col = 0, end_col = 18, conceal = '', text = '├──────┼──────┤' }),
+      'delimiter replaced'
+    )
+    ok(H.has(buf, 2, { col = 0, end_col = 2, conceal = '' }), 'inline markup still concealed')
+    ok(H.has(buf, 2, { col = 9, end_col = 12, conceal = '', pos = 'inline' }), 'body boundary replaced')
+    H.cleanup()
+  end)
+  it('replaces an overflowing table with virtual lines and reveals it for live editing', function()
+    local width = vim.api.nvim_win_get_width(0)
+    local lines = {
+      '| Actor | Role |',
+      '|---|---|',
+      '| Reviewer | ' .. ('long content '):rep(width) .. '|',
+      '',
+      'after',
+    }
+    local buf = H.buffer(lines)
+    local function virtual_line_count()
+      for _, mark in ipairs(H.marks(buf, 3)) do
+        if mark.lines then
+          return mark.lines
+        end
+      end
+      return 0
+    end
+    ok(H.has(buf, 0, { conceal_lines = '' }), 'header source hidden')
+    ok(H.has(buf, 2, { conceal_lines = '' }), 'body source hidden')
+    ok(virtual_line_count() > 1, 'wrapped table attached to the following line')
+
+    require('markvim.render').set_mode(buf, 'live')
+    ok(not H.has(buf, 0, { conceal_lines = '' }), 'source revealed while cursor is in the table')
+    eq(0, virtual_line_count(), 'virtual table hidden while editing')
+    vim.api.nvim_win_set_cursor(0, { 5, 0 })
+    require('markvim.render').cursor(buf)
+    ok(H.has(buf, 0, { conceal_lines = '' }), 'rendering restored after leaving the table')
+    ok(virtual_line_count() > 1, 'virtual table restored after leaving the table')
     H.cleanup()
   end)
 end)

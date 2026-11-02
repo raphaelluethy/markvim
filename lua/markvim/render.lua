@@ -122,14 +122,16 @@ end
 ---@field state markvim.BufState
 ---@field main table<integer, markvim.Mark[]>
 ---@field fixed table<integer, markvim.Mark[]>
+---@field conditional table[] marks shown unless their source block is raw
 ---@field adjustments table<integer, integer[]> row -> flat list of col, delta pairs
 ---@field blocks integer[][] {srow, erow} of block elements (for live.context = 'block')
----@field raw_blocks integer[][] blocks that are always shown raw as a whole when the cursor is inside (diagrams)
+---@field raw_blocks integer[][] blocks that are always shown raw as a whole when the cursor is inside
 ---@field hidden table<integer, boolean> rows hidden with conceal_lines
 ---@field count integer
 ---@field line fun(row: integer): string
 ---@field add fun(row: integer, col: integer, opts: table)
 ---@field fix fun(row: integer, col: integer, opts: table)
+---@field add_conditional fun(row: integer, col: integer, opts: table, block: integer[])
 ---@field adjust fun(row: integer, col: integer, delta: integer)
 ---@field width_of fun(row: integer, scol: integer, ecol: integer): integer
 
@@ -143,6 +145,7 @@ local function new_ctx(buf, s, cfg, width)
     state = s,
     main = {},
     fixed = {},
+    conditional = {},
     adjustments = {},
     blocks = {},
     raw_blocks = {},
@@ -178,6 +181,10 @@ local function new_ctx(buf, s, cfg, width)
       fixed[row] = list
     end
     list[#list + 1] = { col, opts }
+    ctx.count = ctx.count + 1
+  end
+  function ctx.add_conditional(row, col, opts, block)
+    ctx.conditional[#ctx.conditional + 1] = { row = row, col = col, opts = opts, block = block }
     ctx.count = ctx.count + 1
   end
   local adjustments = ctx.adjustments
@@ -378,6 +385,15 @@ end
 
 local set_extmark = api.nvim_buf_set_extmark
 
+local function block_is_raw(raw, block)
+  for row = block[1], block[2] do
+    if raw[row] then
+      return true
+    end
+  end
+  return false
+end
+
 ---Realize the computed marks of `ctx` into a view's namespaces.
 local function apply(buf, view, ctx, tick)
   api.nvim_buf_clear_namespace(buf, view.ns, 0, -1)
@@ -404,6 +420,14 @@ local function apply(buf, view, ctx, tick)
         set_extmark(buf, ns, row, m[1], m[2])
       end
     end
+  end
+  view.conditional = {}
+  for _, mark in ipairs(ctx.conditional) do
+    local entry = { mark = mark }
+    if not block_is_raw(raw, mark.block) then
+      entry.id = set_extmark(buf, ns, mark.row, mark.col, mark.opts)
+    end
+    view.conditional[#view.conditional + 1] = entry
   end
   view.rows = ctx.main
   view.blocks = blocks
@@ -438,6 +462,15 @@ function M.cursor(buf)
       for row in pairs(new) do
         if not old[row] then
           api.nvim_buf_clear_namespace(buf, view.ns, row, row + 1)
+        end
+      end
+      for _, entry in ipairs(view.conditional or {}) do
+        local show = not block_is_raw(new, entry.mark.block)
+        if show and not entry.id and valid then
+          entry.id = set_extmark(buf, view.ns, entry.mark.row, entry.mark.col, entry.mark.opts)
+        elseif not show and entry.id then
+          pcall(api.nvim_buf_del_extmark, buf, view.ns, entry.id)
+          entry.id = nil
         end
       end
       view.raw = new
@@ -709,7 +742,7 @@ local function build_views(buf, s)
     }
   end
   for _, v in ipairs(views) do
-    v.rows, v.raw, v.tick = nil, {}, -1
+    v.rows, v.raw, v.conditional, v.tick = nil, {}, {}, -1
   end
   s.views = views
 end
