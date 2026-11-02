@@ -480,13 +480,15 @@ function M.open(buf, block)
   local title = block.lang .. ' diagram'
   local ok, panels = pcall(require, 'panels')
   if ok then
-    if s and s.panel and (s.panel.layer_id or (s.panel.buf and api.nvim_buf_is_valid(s.panel.buf))) then
-      s.panel.opts.title = title
-      s.panel:set_lines(entry.lines)
-      s.panel:show({ focus = true })
-      return s.panel
-    end
-    local panel = panels.open({ title = title, lines = entry.lines, label = 'markvim', wrap = false })
+    -- One panel per buffer: opening the same id again updates and shows it.
+    local panel = panels.open({
+      id = 'markvim:diagram:' .. buf,
+      label = 'markvim:diagram',
+      title = title,
+      lines = entry.lines,
+      wrap = false,
+      focus = true,
+    })
     if s then
       s.panel = panel
     end

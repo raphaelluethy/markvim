@@ -164,7 +164,10 @@ Art taller than `diagram.max_height` or wider than the window is replaced by
 a one-line placeholder when `diagram.overflow = 'panel'`; `<CR>` on it (or
 on the block, `diagram.keys.open`) and `:Markvim open` show the art in a
 floating panel: a panels.nvim panel (native float, or a Rex layer inside
-Rex) when that plugin is installed, else a plain float (`q` closes).
+Rex) when that plugin is installed, else a plain float (`q` closes). Each
+buffer reuses one panel, labelled `markvim:diagram`; configure it with
+panels.nvim's `groups` option, e.g. `groups = { markvim = { backend =
+'nvim', size = { width = 0.95 } } }`.
 `require('markvim').open_diagram({buf}, {row})` does the same from Lua.
 `diagram.text` sets the spacing of beautiful-mermaid art.
 

@@ -130,7 +130,8 @@ local defaults = {
     max_height = 40,
     -- Text art taller than max_height or wider than the window: 'panel' shows a
     -- one-line placeholder and opens the art in a floating panel (panels.nvim
-    -- when installed, else a plain float) with `keys.open` or `:Markvim open`;
+    -- when installed, label 'markvim:diagram', else a plain float) with
+    -- `keys.open` or `:Markvim open`;
     -- 'truncate' shows the first max_height rows inline.
     overflow = 'panel',
     -- Normal-mode key (buffer-local in markdown files) that opens the diagram

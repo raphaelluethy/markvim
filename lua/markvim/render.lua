@@ -933,8 +933,8 @@ function M.detach(buf)
   if s.open_key then
     pcall(vim.keymap.del, 'n', s.open_key, { buffer = buf })
   end
-  if s.panel then
-    pcall(s.panel.close, s.panel)
+  if s.panel and s.panel.close then
+    s.panel:close()
   end
   pcall(api.nvim_del_augroup_by_name, 'markvim.buf.' .. buf)
   state.remove(buf)
