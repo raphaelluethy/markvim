@@ -20,13 +20,12 @@ function M.heading(ctx, node)
     end
     local hl = 'MarkvimH' .. level
     local icon
-    if cfg.icons == true then
-      icon = ctx.icons.heading[level]
-    elseif type(cfg.icons) == 'table' then
-      icon = cfg.icons[level]
-    end
-    if ctx.cfg.icons == 'ascii' then
-      icon = nil
+    if ctx.cfg.icons ~= 'ascii' then
+      if cfg.icons == true then
+        icon = ctx.icons.heading[level]
+      elseif type(cfg.icons) == 'table' then
+        icon = cfg.icons[level]
+      end
     end
     if icon and icon ~= '' then
       if cfg.position == 'overlay' then

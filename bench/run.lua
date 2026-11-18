@@ -76,7 +76,6 @@ end
 io.write(('no-op render (cached): %.4f ms\n'):format(ms(vim.uv.hrtime() - t0) / iters))
 
 -- Cursor moves in live mode.
-s.mode = 'live'
 render.set_mode(buf, 'live')
 vim.api.nvim_win_set_cursor(0, { 1, 0 })
 render.render(buf, true)

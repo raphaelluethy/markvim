@@ -148,7 +148,7 @@ All groups are `default` links you can override: `MarkvimH1..6`,
 `MarkvimH1Bg..6Bg` (blended), `MarkvimCode`, `MarkvimCodeInline`,
 `MarkvimCodeInfo`, `MarkvimCodeBorder`, `MarkvimBullet`, `MarkvimOrdered`,
 `MarkvimChecked`, `MarkvimUnchecked`, `MarkvimTodo`, `MarkvimQuote`,
-`MarkvimRule`, `MarkvimTable`, `MarkvimTableHead`, `MarkvimLink`, `MarkvimUrl`,
+`MarkvimRule`, `MarkvimTable`, `MarkvimLink`, `MarkvimUrl`,
 `MarkvimImage`, `MarkvimStrike`, `MarkvimMath`, `MarkvimHtml`,
 `MarkvimDiagram`, `MarkvimDiagramPending`, `MarkvimDiagramError`,
 `MarkvimCallout{Note,Tip,Important,Warning,Caution,Question,Quote}`.

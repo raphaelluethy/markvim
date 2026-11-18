@@ -3,7 +3,7 @@
 -- the kitty graphics protocol). Everything runs asynchronously via vim.system.
 --
 -- Add your own with `require('markvim.diagram.renderers').register(spec)`.
-local M = {}
+local M = { node_prefix = vim.fn.stdpath('data') .. '/markvim' }
 
 ---@class markvim.RenderOpts
 ---@field src string diagram source
@@ -14,6 +14,7 @@ local M = {}
 ---@field ascii boolean prefer pure ASCII output
 ---@field script string path to scripts/mermaid.mjs
 ---@field node_prefix string directory holding node_modules for node based renderers
+---@field text {padding_x: integer, padding_y: integer, box_padding: integer}|nil
 
 ---@class markvim.Renderer
 ---@field name string
@@ -23,7 +24,7 @@ local M = {}
 ---@field stdin boolean|nil feed the source on stdin (default true)
 ---@field output 'stdout'|'file' where the result ends up ('file' means `opts.out .. '.' .. ext`)
 ---@field ext string|nil file extension for `output = 'file'`
----@field post nil|fun(opts: markvim.RenderOpts): string[] second stage reading stage one's stdout on stdin and writing the file
+---@field post nil|fun(opts: markvim.RenderOpts): string[] second stage reading stage one's stdout on stdin
 ---@field env table<string, string>|nil
 
 local exe_cache = {}
@@ -36,8 +37,9 @@ local function has_exe(name)
   return v
 end
 
-local function node_module(prefix, name)
-  return has_exe('node') and vim.uv.fs_stat(prefix .. '/node_modules/' .. name .. '/package.json') ~= nil
+local function node_module(name)
+  local package = vim.fs.joinpath(M.node_prefix, 'node_modules', name, 'package.json')
+  return has_exe('node') and vim.uv.fs_stat(package) ~= nil
 end
 
 local function svg_to_png(opts)
@@ -52,17 +54,11 @@ local function has_svg_converter()
 end
 
 ---@type table<string, markvim.Renderer>
-M.specs = {}
+local specs = {}
 
 ---@param spec markvim.Renderer
 function M.register(spec)
-  M.specs[spec.name] = spec
-end
-
-local prefix_for -- set by init via M.set_prefix
-
-function M.set_prefix(fn)
-  prefix_for = fn
+  specs[spec.name] = spec
 end
 
 M.register({
@@ -70,7 +66,7 @@ M.register({
   kind = 'text',
   output = 'stdout',
   available = function()
-    return node_module(prefix_for(), 'beautiful-mermaid')
+    return node_module('beautiful-mermaid')
   end,
   cmd = function(o)
     return {
@@ -108,7 +104,7 @@ M.register({
   output = 'file',
   ext = 'png',
   available = function()
-    return node_module(prefix_for(), 'pele') and has_svg_converter()
+    return node_module('pele') and has_svg_converter()
   end,
   cmd = function(o)
     return { 'node', o.script, 'pele', 'svg', vim.json.encode({ fg = o.fg, bg = 'transparent', fontSize = 14 }) }
@@ -122,7 +118,7 @@ M.register({
   output = 'file',
   ext = 'png',
   available = function()
-    return node_module(prefix_for(), 'beautiful-mermaid') and has_svg_converter()
+    return node_module('beautiful-mermaid') and has_svg_converter()
   end,
   cmd = function(o)
     return { 'node', o.script, 'beautiful-mermaid', 'svg', vim.json.encode({ fg = o.fg, bg = 'transparent' }) }
@@ -252,31 +248,15 @@ M.register({
   end,
 })
 
--- Test renderer: echoes the source back as "art". Used by the test-suite.
-M.register({
-  name = 'echo',
-  kind = 'text',
-  output = 'stdout',
-  available = function()
-    return has_exe('cat')
-  end,
-  cmd = function()
-    return { 'cat' }
-  end,
-})
-
--- Image renderer names are looked up as `<name>` and `<name>-png`/`-svg`.
-local image_aliases = { plantuml = 'plantuml-png', d2 = 'd2-png' }
-
 ---First available renderer of `kind` among `names`.
 ---@param names string[]
 ---@param kind 'text'|'image'
 ---@return markvim.Renderer|nil
 function M.pick(names, kind)
   for _, name in ipairs(names) do
-    local spec = M.specs[name]
+    local spec = specs[name]
     if kind == 'image' and (not spec or spec.kind ~= 'image') then
-      spec = M.specs[image_aliases[name] or (name .. '-png')]
+      spec = specs[name .. '-png']
     end
     if spec and spec.kind == kind and spec.available() then
       return spec
@@ -288,7 +268,7 @@ end
 ---Availability report for :checkhealth.
 function M.report()
   local out = {}
-  for name, spec in pairs(M.specs) do
+  for name, spec in pairs(specs) do
     out[#out + 1] = { name = name, kind = spec.kind, available = spec.available() }
   end
   table.sort(out, function(a, b)

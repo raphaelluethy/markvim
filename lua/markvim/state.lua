@@ -4,12 +4,13 @@
 ---@field ns_fixed integer namespace for marks that always stay (backgrounds, virtual lines)
 ---@field wins integer[]|nil windows the view is scoped to; nil = all windows
 ---@field hybrid boolean whether the cursor line is shown raw
----@field rows table<integer, markvim.Mark[]> cached marks per row from the last render
+---@field rows table<integer, markvim.Mark[]>|nil cached marks per row from the last render
 ---@field raw table<integer, boolean> rows currently shown raw
----@field tick integer changedtick the cache belongs to
+---@field blocks integer[][]|nil blocks that go raw when they contain the cursor
+---@field conditional {mark: markvim.ConditionalMark, id: integer|nil}[]|nil
+---@field tick integer|nil changedtick the cache belongs to
 
 ---@class markvim.BufState
----@field buf integer
 ---@field enabled boolean
 ---@field mode 'live'|'preview'|'split'
 ---@field float boolean
@@ -24,9 +25,8 @@
 ---@field split {win: integer, src_win: integer}|nil
 ---@field win_opts table<integer, table> saved window options
 ---@field stats table
----@field diagrams table<string, boolean> pending diagram keys
----@field diagram_blocks table[]|nil text diagrams in the last render ({top, bottom, lang, entry, large})
----@field panel panels.Panel|table|nil panel showing a diagram (panels.nvim, or the fallback float)
+---@field diagram_blocks markvim.DiagramBlock[]|nil text diagrams in the last render
+---@field panel panels.Panel|nil panel managed by panels.nvim
 ---@field open_key string|nil buffer-local key that opens diagrams
 
 local M = {}
@@ -44,20 +44,12 @@ end
 ---@return markvim.BufState
 function M.new(buf)
   local s = {
-    buf = buf,
     enabled = true,
     mode = 'live',
     float = false,
     views = {},
-    rendered = nil,
-    timer = nil,
-    parser = nil,
-    inline = nil,
-    inline_tick = nil,
-    split = nil,
     win_opts = {},
     stats = {},
-    diagrams = {},
   }
   M.buffers[buf] = s
   return s

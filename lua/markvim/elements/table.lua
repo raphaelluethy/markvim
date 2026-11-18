@@ -149,7 +149,6 @@ local function wrap_text(text, width)
     else
       if current ~= '' then
         lines[#lines + 1] = current
-        current = ''
       end
       if vim.api.nvim_strwidth(word) <= width then
         current = word
@@ -202,15 +201,14 @@ local function bounded_widths(desired, available)
   return widths, edge
 end
 
-local function aligned(text, width, align)
-  local missing = math.max(0, width - vim.api.nvim_strwidth(text))
+local function padding(missing, align)
   if align == 'right' then
-    return (' '):rep(missing) .. text
+    return missing, 0
   elseif align == 'center' then
     local before = math.floor(missing / 2)
-    return (' '):rep(before) .. text .. (' '):rep(missing - before)
+    return before, missing - before
   end
-  return text .. (' '):rep(missing)
+  return 0, missing
 end
 
 local function virtual_table_lines(rows, aligns, widths, edge, indent, icons, hl, full)
@@ -226,7 +224,7 @@ local function virtual_table_lines(rows, aligns, widths, edge, indent, icons, hl
   local function content(row)
     local wrapped, height = {}, 1
     for i, width in ipairs(widths) do
-      local cell = row.cells and row.cells[i]
+      local cell = row.cells[i]
       wrapped[i] = wrap_text(cell and cell.text or '', width)
       height = math.max(height, #wrapped[i])
     end
@@ -234,7 +232,9 @@ local function virtual_table_lines(rows, aligns, widths, edge, indent, icons, hl
       local parts = { (' '):rep(indent), icons.v }
       for i, width in ipairs(widths) do
         local text = wrapped[i][line] or ''
-        parts[#parts + 1] = (' '):rep(edge) .. aligned(text, width, aligns[i] or 'left') .. (' '):rep(edge) .. icons.v
+        local missing = math.max(0, width - vim.api.nvim_strwidth(text))
+        local left, right = padding(missing, aligns[i])
+        parts[#parts + 1] = (' '):rep(edge + left) .. text .. (' '):rep(edge + right) .. icons.v
       end
       lines[#lines + 1] = { { table.concat(parts), hl } }
     end
@@ -256,10 +256,7 @@ local function virtual_table_lines(rows, aligns, widths, edge, indent, icons, hl
   return lines
 end
 
----@param ctx markvim.Ctx
----@param node TSNode
-M['table'] = function(ctx, node)
-  local cfg = ctx.cfg.table
+local function table_rows(node)
   local rows, aligns = {}, {}
   for child in node:iter_children() do
     local t = child:type()
@@ -268,7 +265,7 @@ M['table'] = function(ctx, node)
       if not sr then
         return
       end
-      rows[#rows + 1] = { row = sr, bounds = bounds, real = real, delim = t == 'pipe_table_delimiter_row' }
+      rows[#rows + 1] = { row = sr, bounds = bounds, real = real, delim = t == 'pipe_table_delimiter_row', cells = {} }
       if t == 'pipe_table_delimiter_row' then
         local i = 0
         for cell in child:iter_children() do
@@ -289,98 +286,84 @@ M['table'] = function(ctx, node)
       end
     end
   end
-  if #rows == 0 then
-    return
-  end
+  return rows, aligns
+end
 
+local function measure_rows(ctx, rows)
   local widths, source_widths, content_widths = {}, {}, {}
   for _, r in ipairs(rows) do
     for i = 1, #r.bounds - 1 do
-      local w = 0
-      if not r.delim then
-        r.cells = r.cells or {}
-        r.cells[i] = cell_span(ctx, r.row, r.bounds[i] + 1, r.bounds[i + 1])
-        r.cells[i].text = rendered_text(ctx, r.row, r.cells[i].content_start, r.cells[i].content_end)
-        w = r.cells[i].width
-        content_widths[i] = math.max(content_widths[i] or 0, vim.api.nvim_strwidth(r.cells[i].text))
-        source_widths[i] = math.max(source_widths[i] or 0, ctx.width_of(r.row, r.bounds[i] + 1, r.bounds[i + 1]))
+      if r.delim then
+        widths[i] = widths[i] or 0
+      else
+        local start_col, end_col = r.bounds[i] + 1, r.bounds[i + 1]
+        local cell = cell_span(ctx, r.row, start_col, end_col)
+        cell.text = rendered_text(ctx, r.row, cell.content_start, cell.content_end)
+        r.cells[i] = cell
+        widths[i] = math.max(widths[i] or 0, cell.width)
+        content_widths[i] = math.max(content_widths[i] or 0, vim.api.nvim_strwidth(cell.text))
+        source_widths[i] = math.max(source_widths[i] or 0, ctx.width_of(r.row, start_col, end_col))
       end
-      if w > (widths[i] or 0) then
-        widths[i] = w
-      end
-      widths[i] = widths[i] or 0
     end
   end
+  return widths, source_widths, content_widths
+end
 
-  local t = ctx.icons.table
-  local hl = 'MarkvimTable'
-  local _, indent = node:range()
-  local total, source_total = indent + #widths + 1, indent + #widths + 1
-  for i = 1, #widths do
-    content_widths[i] = content_widths[i] or 0
-    total = total + content_widths[i] + 2
-    source_total = source_total + (source_widths[i] or 0)
+-- Replace a wide table with virtual lines anchored to a visible source row.
+local function render_wrapped(ctx, rows, virtual)
+  local block = { rows[1].row, rows[#rows].row }
+  ctx.raw_blocks[#ctx.raw_blocks + 1] = block
+
+  local line_count = vim.api.nvim_buf_line_count(ctx.buf)
+  local anchor, above
+  if block[1] > 0 and not ctx.hidden[block[1] - 1] then
+    anchor, above = block[1] - 1, false
+  elseif block[2] + 1 < line_count and not ctx.hidden[block[2] + 1] then
+    anchor, above = block[2] + 1, true
   end
-  local overflow = total > ctx.width or source_total > ctx.width
-  if overflow then
-    local available = math.max(1, ctx.width - indent)
-    local virtual_widths, edge
-    if total <= ctx.width then
-      virtual_widths, edge = content_widths, 1
-    else
-      virtual_widths, edge = bounded_widths(content_widths, available)
+  if anchor then
+    for row = block[1], block[2] do
+      ctx.add(row, 0, { conceal_lines = '' })
+      ctx.hidden[row] = true
     end
-    local virtual = virtual_table_lines(rows, aligns, virtual_widths, edge, indent, t, hl, cfg.style == 'full')
-    local block = { rows[1].row, rows[#rows].row }
-    ctx.raw_blocks[#ctx.raw_blocks + 1] = block
-    ctx.blocks[#ctx.blocks + 1] = block
-
-    local line_count = vim.api.nvim_buf_line_count(ctx.buf)
-    local anchor, above
-    if block[1] > 0 and not ctx.hidden[block[1] - 1] then
-      anchor, above = block[1] - 1, false
-    elseif block[2] + 1 < line_count and not ctx.hidden[block[2] + 1] then
-      anchor, above = block[2] + 1, true
+    ctx.add_conditional(anchor, 0, { virt_lines = virtual, virt_lines_above = above }, block)
+  else
+    -- A buffer containing only the table has no visible line to anchor
+    -- virtual lines to. Keep the shortest source row as an inline anchor,
+    -- hide every other source row and overlay the first table line on it.
+    -- An inline insertion can wrap to a blank row on Neovim 0.12.
+    local anchor_row, shortest
+    for row = block[1], block[2] do
+      local width = vim.api.nvim_strwidth(ctx.line(row))
+      if not shortest or width < shortest then
+        anchor_row, shortest = row, width
+      end
     end
-    if anchor then
-      for row = block[1], block[2] do
+    for row = block[1], block[2] do
+      if row ~= anchor_row then
         ctx.add(row, 0, { conceal_lines = '' })
         ctx.hidden[row] = true
       end
-      ctx.add_conditional(anchor, 0, { virt_lines = virtual, virt_lines_above = above }, block)
-    else
-      -- A buffer containing only the table has no visible line to anchor
-      -- virtual lines to. Keep the shortest source row as an inline anchor,
-      -- hide every other source row and render the first table line in place.
-      local anchor_row, shortest
-      for row = block[1], block[2] do
-        local width = vim.api.nvim_strwidth(ctx.line(row))
-        if not shortest or width < shortest then
-          anchor_row, shortest = row, width
-        end
-      end
-      for row = block[1], block[2] do
-        if row ~= anchor_row then
-          ctx.add(row, 0, { conceal_lines = '' })
-          ctx.hidden[row] = true
-        end
-      end
-      local first = table.remove(virtual, 1)
-      local opts = {
-        end_col = #ctx.line(anchor_row),
-        conceal = '',
-        virt_text = first,
-        virt_text_pos = 'inline',
-        priority = 250,
-      }
-      if #virtual > 0 then
-        ctx.add_conditional(anchor_row, 0, { virt_lines = virtual }, block)
-      end
-      ctx.add_conditional(anchor_row, 0, opts, block)
     end
-    return
+    local first = table.remove(virtual, 1)
+    local opts = {
+      end_col = #ctx.line(anchor_row),
+      conceal = '',
+      virt_text = first,
+      virt_text_pos = 'overlay',
+      priority = 250,
+    }
+    if #virtual > 0 then
+      ctx.add_conditional(anchor_row, 0, { virt_lines = virtual }, block)
+    end
+    ctx.add_conditional(anchor_row, 0, opts, block)
   end
+end
 
+local function render_in_place(ctx, rows, aligns, widths, indent)
+  local cfg = ctx.cfg.table
+  local t = ctx.icons.table
+  local hl = 'MarkvimTable'
   local pad = cfg.pad
   local function border(l, m, r)
     local parts = { (' '):rep(indent), l }
@@ -407,16 +390,8 @@ M['table'] = function(ctx, node)
       -- Padding of each cell, split into before/after by alignment.
       local before, after = {}, {}
       for i = 1, #bounds - 1 do
-        local missing = pad and (widths[i] or 0) - r.cells[i].width or 0
-        local align = aligns[i] or 'left'
-        if align == 'right' then
-          before[i], after[i] = missing, 0
-        elseif align == 'center' then
-          before[i] = math.floor(missing / 2)
-          after[i] = missing - before[i]
-        else
-          before[i], after[i] = 0, missing
-        end
+        local missing = pad and widths[i] - r.cells[i].width or 0
+        before[i], after[i] = padding(missing, aligns[i])
       end
       -- Use one mark for the whitespace, raw pipe and virtual replacement at
       -- each boundary. Besides compacting formatter whitespace, keeping conceal
@@ -466,7 +441,47 @@ M['table'] = function(ctx, node)
       end
     end
   end
-  ctx.blocks[#ctx.blocks + 1] = { rows[1].row, rows[#rows].row }
+end
+
+---@param ctx markvim.Ctx
+---@param node TSNode
+function M.table(ctx, node)
+  local rows, aligns = table_rows(node)
+  if not rows or #rows == 0 then
+    return
+  end
+  local widths, source_widths, content_widths = measure_rows(ctx, rows)
+  local _, indent = node:range()
+  local total, source_total = indent + #widths + 1, indent + #widths + 1
+  for i = 1, #widths do
+    content_widths[i] = content_widths[i] or 0
+    total = total + content_widths[i] + 2
+    source_total = source_total + (source_widths[i] or 0)
+  end
+
+  if total <= ctx.width and source_total <= ctx.width then
+    render_in_place(ctx, rows, aligns, widths, indent)
+    ctx.blocks[#ctx.blocks + 1] = { rows[1].row, rows[#rows].row }
+    return
+  end
+
+  -- Even compact tables can overflow if the source was heavily padded. In
+  -- that case use virtual lines at their natural widths, without wrapping.
+  local virtual_widths, edge = content_widths, 1
+  if total > ctx.width then
+    virtual_widths, edge = bounded_widths(content_widths, math.max(1, ctx.width - indent))
+  end
+  local virtual = virtual_table_lines(
+    rows,
+    aligns,
+    virtual_widths,
+    edge,
+    indent,
+    ctx.icons.table,
+    'MarkvimTable',
+    ctx.cfg.table.style == 'full'
+  )
+  render_wrapped(ctx, rows, virtual)
 end
 
 return M

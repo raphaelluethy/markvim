@@ -15,9 +15,8 @@ function M.check()
       health.error('missing treesitter parser: ' .. lang)
     end
   end
-  local ok, err = pcall(require('markvim.config').get)
+  local ok, cfg = pcall(require('markvim.config').get)
   if ok then
-    local cfg = require('markvim.config').get()
     health.ok(
       ('config: mode=%s float_mode=%s icons=%s code.border=%s diagram.backend=%s'):format(
         cfg.mode,
@@ -28,7 +27,7 @@ function M.check()
       )
     )
   else
-    health.error('invalid config: ' .. tostring(err))
+    health.error('invalid config: ' .. tostring(cfg))
   end
   local n = 0
   for _ in pairs(require('markvim.state').buffers) do
@@ -39,15 +38,13 @@ function M.check()
   health.start('markvim: diagram renderers')
   local renderers = require('markvim.diagram').renderers
   for _, r in ipairs(renderers.report()) do
-    if r.name ~= 'echo' then
-      if r.available then
-        health.ok(('%s (%s)'):format(r.name, r.kind))
-      else
-        health.info(('%s (%s): not available'):format(r.name, r.kind))
-      end
+    if r.available then
+      health.ok(('%s (%s)'):format(r.name, r.kind))
+    else
+      health.info(('%s (%s): not available'):format(r.name, r.kind))
     end
   end
-  local prefix = vim.fn.stdpath('data') .. '/markvim/node_modules'
+  local prefix = renderers.node_prefix .. '/node_modules'
   if vim.uv.fs_stat(prefix) then
     health.ok('node renderers installed in ' .. prefix)
   else

@@ -67,28 +67,26 @@ function M.code(ctx, node)
   local first = sr + 1
   local lastc = has_close and last - 1 or last
 
-  if lang and ctx.cfg.diagram.enabled and ctx.cfg.diagram.backend ~= 'none' then
-    local dcfg = ctx.cfg.diagram.languages[lang:lower()]
-    if dcfg then
-      local handled = require('markvim.elements.diagram').code(ctx, node, lang:lower(), {
-        top = sr,
-        bottom = last,
-        first = first,
-        last = lastc,
-        has_close = has_close,
-      })
-      if handled then
-        return
-      end
+  local diagram_cfg = ctx.cfg.diagram
+  local diagram_lang = lang and lang:lower()
+  if diagram_lang and diagram_cfg.enabled and diagram_cfg.backend ~= 'none' and diagram_cfg.languages[diagram_lang] then
+    local handled = require('markvim.diagram').render_block(ctx, node, diagram_lang, {
+      top = sr,
+      bottom = last,
+      first = first,
+      last = lastc,
+    })
+    if handled then
+      return
     end
   end
 
   ctx.blocks[#ctx.blocks + 1] = { sr, last }
   local bg = cfg.background
   if bg == 'buffer' then
-    bg = not ctx.state.float
+    bg = not ctx.float
   elseif bg == 'auto' then
-    bg = not (ctx.state.float and only_block(ctx, sr, last))
+    bg = not (ctx.float and only_block(ctx, sr, last))
   end
   local pad = cfg.left_pad > 0 and { { (' '):rep(cfg.left_pad), bg and 'MarkvimCode' or nil } } or nil
   for row = first, lastc do
@@ -139,7 +137,7 @@ function M.code(ctx, node)
       place_label()
     end
   elseif cfg.border == 'thin' then
-    local h = ctx.icons.border.h
+    local h = ctx.icons.rule
     local top_line = ctx.line(sr)
     local text, used = {}, 0
     if label and cfg.language_pos == 'left' then

@@ -15,331 +15,9 @@ local state = require('markvim.state')
 local config = require('markvim.config')
 local util = require('markvim.util')
 local ts = require('markvim.ts')
+local compute = require('markvim.compute')
 
 local M = {}
-
----@class markvim.Mark
----@field [1] integer col
----@field [2] table extmark opts
-
--- Element registry --------------------------------------------------------
--- capture -> { module, config key, treesitter language, query pattern }
-local ELEMENTS = {
-  heading = { 'heading', 'heading', 'markdown', '[(atx_heading) (setext_heading)] @heading' },
-  code = { 'code', 'code', 'markdown', '(fenced_code_block) @code' },
-  code_indent = { 'code', 'code', 'markdown', '(indented_code_block) @code_indent' },
-  list_item = { 'list', 'bullet', 'markdown', '(list_item) @list_item' },
-  quote = { 'quote', 'quote', 'markdown', '(block_quote) @quote' },
-  table = { 'table', 'table', 'markdown', '(pipe_table) @table' },
-  rule = { 'rule', 'rule', 'markdown', '(thematic_break) @rule' },
-  html = { 'html', 'html', 'markdown', '(html_block) @html' },
-  code_span = { 'inline', 'inline', 'markdown_inline', '(code_span) @code_span' },
-  emphasis = { 'inline', 'inline', 'markdown_inline', '(emphasis) @emphasis' },
-  strong = { 'inline', 'inline', 'markdown_inline', '(strong_emphasis) @strong' },
-  strike = { 'inline', 'inline', 'markdown_inline', '(strikethrough) @strike' },
-  escape = { 'inline', 'inline', 'markdown_inline', '(backslash_escape) @escape' },
-  latex = { 'inline', 'inline', 'markdown_inline', '(latex_block) @latex' },
-  html_tag = { 'inline', 'inline', 'markdown_inline', '(html_tag) @html_tag' },
-  hard_break = { 'inline', 'inline', 'markdown_inline', '(hard_line_break) @hard_break' },
-  link = { 'link', 'link', 'markdown_inline', '(inline_link) @link' },
-  image = { 'link', 'link', 'markdown_inline', '(image) @image' },
-  shortcut = { 'link', 'link', 'markdown_inline', '(shortcut_link) @shortcut' },
-  ref_link = { 'link', 'link', 'markdown_inline', '[(full_reference_link) (collapsed_reference_link)] @ref_link' },
-  autolink = { 'link', 'link', 'markdown_inline', '[(uri_autolink) (email_autolink)] @autolink' },
-}
--- Stable order so generated query text is deterministic.
-local ELEMENT_ORDER = {
-  'heading',
-  'code',
-  'code_indent',
-  'list_item',
-  'quote',
-  'table',
-  'rule',
-  'html',
-  'code_span',
-  'emphasis',
-  'strong',
-  'strike',
-  'escape',
-  'latex',
-  'html_tag',
-  'hard_break',
-  'link',
-  'image',
-  'shortcut',
-  'ref_link',
-  'autolink',
-}
-
-local loaded_modules = {}
-
-local function element_module(name)
-  local mod = loaded_modules[name]
-  if not mod then
-    mod = require('markvim.elements.' .. name)
-    loaded_modules[name] = mod
-  end
-  return mod
-end
-
-local query_sets = {}
-
----Build (and cache) the block/inline queries for the enabled elements.
----@param cfg markvim.Config
----@return vim.treesitter.Query|nil block, vim.treesitter.Query|nil inline
-local function queries(cfg)
-  local parts, key = { markdown = {}, markdown_inline = {} }, {}
-  for _, cap in ipairs(ELEMENT_ORDER) do
-    local el = ELEMENTS[cap]
-    local section = cfg[el[2]]
-    if section and section.enabled ~= false then
-      table.insert(parts[el[3]], el[4])
-      key[#key + 1] = cap
-    end
-  end
-  local k = table.concat(key, ',')
-  local set = query_sets[k]
-  if not set then
-    set = {
-      block = #parts.markdown > 0 and ts.query('markdown', table.concat(parts.markdown, '\n')) or false,
-      inline = #parts.markdown_inline > 0 and ts.query('markdown_inline', table.concat(parts.markdown_inline, '\n'))
-        or false,
-    }
-    query_sets[k] = set
-  end
-  return set.block or nil, set.inline or nil
-end
-
--- Context -------------------------------------------------------------------
-
----@class markvim.Ctx
----@field buf integer
----@field cfg markvim.Config
----@field icons table
----@field width integer usable text width of the narrowest window
----@field mode string
----@field state markvim.BufState
----@field main table<integer, markvim.Mark[]>
----@field fixed table<integer, markvim.Mark[]>
----@field conditional table[] marks shown unless their source block is raw
----@field adjustments table<integer, integer[]> row -> flat list of col, delta pairs
----@field blocks integer[][] {srow, erow} of block elements (for live.context = 'block')
----@field raw_blocks integer[][] blocks that are always shown raw as a whole when the cursor is inside
----@field hidden table<integer, boolean> rows hidden with conceal_lines
----@field count integer
----@field line fun(row: integer): string
----@field add fun(row: integer, col: integer, opts: table)
----@field fix fun(row: integer, col: integer, opts: table)
----@field add_conditional fun(row: integer, col: integer, opts: table, block: integer[])
----@field adjust fun(row: integer, col: integer, delta: integer)
----@field width_of fun(row: integer, scol: integer, ecol: integer): integer
-
-local function new_ctx(buf, s, cfg, width)
-  local ctx = {
-    buf = buf,
-    cfg = cfg,
-    icons = require('markvim.icons').get(cfg.icons),
-    width = width,
-    mode = s.mode,
-    state = s,
-    main = {},
-    fixed = {},
-    conditional = {},
-    adjustments = {},
-    blocks = {},
-    raw_blocks = {},
-    hidden = {},
-    diagrams = {},
-    count = 0,
-  }
-  local lines, base = {}, 0
-  function ctx.set_lines(top, l)
-    lines, base = l, top
-  end
-  function ctx.line(row)
-    local l = lines[row - base + 1]
-    if l == nil then
-      l = api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ''
-    end
-    return l
-  end
-  local main, fixed = ctx.main, ctx.fixed
-  function ctx.add(row, col, opts)
-    local list = main[row]
-    if not list then
-      list = {}
-      main[row] = list
-    end
-    list[#list + 1] = { col, opts }
-    ctx.count = ctx.count + 1
-  end
-  function ctx.fix(row, col, opts)
-    local list = fixed[row]
-    if not list then
-      list = {}
-      fixed[row] = list
-    end
-    list[#list + 1] = { col, opts }
-    ctx.count = ctx.count + 1
-  end
-  function ctx.add_conditional(row, col, opts, block)
-    ctx.conditional[#ctx.conditional + 1] = { row = row, col = col, opts = opts, block = block }
-    ctx.count = ctx.count + 1
-  end
-  local adjustments = ctx.adjustments
-  function ctx.adjust(row, col, delta)
-    local list = adjustments[row]
-    if not list then
-      list = {}
-      adjustments[row] = list
-    end
-    list[#list + 1] = col
-    list[#list + 1] = delta
-  end
-  -- Display width of a byte range of a row after conceals/inserted icons.
-  function ctx.width_of(row, scol, ecol)
-    local w = api.nvim_strwidth(ctx.line(row):sub(scol + 1, ecol))
-    local list = adjustments[row]
-    if list then
-      for i = 1, #list, 2 do
-        local c = list[i]
-        if c >= scol and c < ecol then
-          w = w + list[i + 1]
-        end
-      end
-    end
-    return w
-  end
-  return ctx
-end
-
-local INLINE_REGION_QUERY = '[(inline) (pipe_table_cell)] @region'
-
----Parse the inline regions inside `ranges` with the buffer's private
----markdown_inline tree and return its trees (empty when there are none).
----@return table<integer, TSTree>|nil
-local function inline_trees_for(buf, s, root, ranges)
-  local tick = api.nvim_buf_get_changedtick(buf)
-  local lt = s.inline
-  if s.inline_tick == tick and vim.deep_equal(s.inline_ranges, ranges) then
-    return s.inline_trees
-  end
-  if lt and s.inline_tick ~= tick then
-    -- The private tree gets no edit notifications.
-    lt:invalidate()
-  end
-  s.inline_tick, s.inline_ranges, s.inline_trees = tick, ranges, nil
-
-  local q = ts.query('markdown', INLINE_REGION_QUERY)
-  local regions = {}
-  for _, r in ipairs(ranges) do
-    for _, node in q:iter_captures(root, buf, r[1], r[2] + 1) do
-      local sr, sc, er, ec = node:range()
-      local count = node:named_child_count()
-      if count == 0 then
-        regions[#regions + 1] = { { sr, sc, er, ec } }
-      else
-        -- Exclude named children (block continuation markers such as `> `),
-        -- exactly like the injection machinery does.
-        local list = {}
-        local row, col = sr, sc
-        for i = 0, count - 1 do
-          local csr, csc, cer, cec = node:named_child(i):range()
-          if csr > row or (csr == row and csc > col) then
-            list[#list + 1] = { row, col, csr, csc }
-          end
-          row, col = cer, cec
-        end
-        if er > row or (er == row and ec > col) then
-          list[#list + 1] = { row, col, er, ec }
-        end
-        if #list > 0 then
-          regions[#regions + 1] = list
-        end
-      end
-    end
-  end
-  if #regions == 0 then
-    return nil -- never parse with zero regions: that would mean "whole buffer"
-  end
-  if not lt then
-    lt = require('vim.treesitter.languagetree').new(buf, 'markdown_inline', { injections = { markdown_inline = '' } })
-    s.inline = lt
-  end
-  lt:set_included_regions(regions)
-  s.inline_trees = lt:parse(true)
-  return s.inline_trees
-end
-
--- Compute -------------------------------------------------------------------
-
----Run the queries over `ranges` and collect marks into a context.
----@param buf integer
----@param s markvim.BufState
----@param ranges integer[][] inclusive 0-based row ranges
----@param width integer
----@return markvim.Ctx|nil
-local function compute(buf, s, ranges, width)
-  local parser = s.parser
-  if not parser then
-    parser = ts.parser(buf)
-    if not parser then
-      return nil
-    end
-    s.parser = parser
-  end
-  local cfg = config.get()
-  local ctx = new_ctx(buf, s, cfg, width)
-  local block_q, inline_q = queries(cfg)
-
-  local phases = {}
-  ctx.phases = phases
-  local t0 = util.now()
-  -- Only the block tree is needed here. Leave injections to the highlighter.
-  local trees = parser:parse()
-  local root = trees and trees[1] and trees[1]:root()
-  if not root then
-    return nil
-  end
-  phases.parse = util.now() - t0
-  -- Inline content is parsed with a private markdown_inline tree restricted to
-  -- the inline regions of the visible rows. The shared parser's injected child
-  -- can hold a tree per paragraph of the whole file (see ARCHITECTURE.md), which
-  -- makes every iteration and edit O(file); this keeps it O(viewport).
-  t0 = util.now()
-  local inline_trees = inline_q and inline_trees_for(buf, s, root, ranges) or nil
-  phases.inline_parse = util.now() - t0
-  t0 = util.now()
-
-  for _, r in ipairs(ranges) do
-    local top, bot = r[1], r[2]
-    ctx.set_lines(top, api.nvim_buf_get_lines(buf, top, bot + 1, false))
-    -- Inline first: tables need the width adjustments produced here.
-    if inline_trees then
-      local captures = inline_q.captures
-      for _, tree in pairs(inline_trees) do
-        local iroot = tree:root()
-        local sr, _, er = iroot:range()
-        if er >= top and sr <= bot then
-          for id, node in inline_q:iter_captures(iroot, buf, math.max(sr, top), math.min(er, bot) + 1) do
-            local cap = captures[id]
-            element_module(ELEMENTS[cap][1])[cap](ctx, node)
-          end
-        end
-      end
-    end
-    if block_q then
-      local captures = block_q.captures
-      for id, node in block_q:iter_captures(root, buf, top, bot + 1) do
-        local cap = captures[id]
-        element_module(ELEMENTS[cap][1])[cap](ctx, node)
-      end
-    end
-  end
-  phases.elements = util.now() - t0
-  return ctx
-end
 
 -- Views ---------------------------------------------------------------------
 
@@ -356,8 +34,7 @@ local function windows_of(buf, view)
   return vim.fn.win_findbuf(buf)
 end
 
----Rows that must be shown raw for a view (cursor rows of its windows).
----@return table<integer, boolean>
+-- Expand a cursor row to the enclosing raw block, if any.
 local function expand(rows, row, blocks)
   for _, b in ipairs(blocks) do
     if row >= b[1] and row <= b[2] then
@@ -369,6 +46,8 @@ local function expand(rows, row, blocks)
   end
 end
 
+---Rows that must be shown raw for a view (cursor rows of its windows).
+---@return table<integer, boolean>
 local function raw_rows(buf, view, blocks)
   local rows = {}
   if not view.hybrid then
@@ -521,7 +200,29 @@ local function min_width(wins)
   for _, win in ipairs(wins) do
     w = math.min(w, util.text_width(win))
   end
-  return w == math.huge and 80 or w
+  return w
+end
+
+local function set_win_option(win, name, value)
+  api.nvim_set_option_value(name, value, { win = win, scope = 'local' })
+end
+
+---Make sure every window showing the buffer has the right conceal options.
+local function ensure_win_options(s, wins, cfg)
+  for _, win in ipairs(wins) do
+    if not s.win_opts[win] then
+      s.win_opts[win] = {
+        conceallevel = api.nvim_get_option_value('conceallevel', { win = win }),
+        concealcursor = api.nvim_get_option_value('concealcursor', { win = win }),
+      }
+      local raw_edit = s.mode == 'split' and cfg.split.edit == 'raw' and (not s.split or win ~= s.split.win)
+      if not raw_edit then
+        set_win_option(win, 'conceallevel', cfg.win_options.conceallevel)
+        local preview = s.mode == 'preview' or (s.split and win == s.split.win)
+        set_win_option(win, 'concealcursor', preview and 'nvic' or '')
+      end
+    end
+  end
 end
 
 -- Render --------------------------------------------------------------------
@@ -539,8 +240,8 @@ function M.render(buf, force)
     return
   end
   local t0 = util.now()
-  M.ensure_win_options(buf, s, wins)
   local cfg = config.get()
+  ensure_win_options(s, wins, cfg)
   local tick = api.nvim_buf_get_changedtick(buf)
   local visible, padded = viewport(buf, wins, cfg.margin)
   if not force and s.rendered and s.rendered.tick == tick and covered(s.rendered.ranges, visible) then
@@ -548,7 +249,7 @@ function M.render(buf, force)
     return
   end
   local t1 = util.now()
-  local ctx = compute(buf, s, padded, min_width(wins))
+  local ctx = compute(buf, s, cfg, padded, min_width(wins))
   if not ctx then
     return
   end
@@ -558,7 +259,7 @@ function M.render(buf, force)
   end
   local t3 = util.now()
   s.rendered = { ranges = padded, tick = tick }
-  s.diagram_blocks = ctx.diagrams
+  s.diagram_blocks = ctx.diagram_blocks
   s.stats = {
     viewport_ms = t1 - t0,
     compute_ms = t2 - t1,
@@ -567,7 +268,6 @@ function M.render(buf, force)
     phases = ctx.phases,
     marks = ctx.count,
     ranges = padded,
-    at = t0,
   }
 end
 
@@ -602,29 +302,6 @@ end
 
 -- Window options ------------------------------------------------------------
 
-local function set_win_option(win, name, value)
-  api.nvim_set_option_value(name, value, { win = win, scope = 'local' })
-end
-
----Make sure every window showing the buffer has the right conceal options.
-function M.ensure_win_options(buf, s, wins)
-  local cfg = config.get()
-  for _, win in ipairs(wins or vim.fn.win_findbuf(buf)) do
-    if not s.win_opts[win] then
-      s.win_opts[win] = {
-        conceallevel = api.nvim_get_option_value('conceallevel', { win = win }),
-        concealcursor = api.nvim_get_option_value('concealcursor', { win = win }),
-      }
-      local raw_edit = s.mode == 'split' and cfg.split.edit == 'raw' and (not s.split or win ~= s.split.win)
-      if not raw_edit then
-        set_win_option(win, 'conceallevel', cfg.win_options.conceallevel)
-        local preview = s.mode == 'preview' or (s.split and win == s.split.win)
-        set_win_option(win, 'concealcursor', preview and 'nvic' or '')
-      end
-    end
-  end
-end
-
 local function restore_win_options(s)
   for win, opts in pairs(s.win_opts) do
     if api.nvim_win_is_valid(win) then
@@ -641,12 +318,13 @@ local function ns_for(buf, name)
   return api.nvim_create_namespace(('markvim:%d:%s'):format(buf, name))
 end
 
-local function clear_all(buf, s)
+local function clear_views(buf, views)
   if not api.nvim_buf_is_valid(buf) then
     return
   end
-  for _, name in ipairs({ 'main', 'fixed', 'preview', 'preview_fixed', 'edit', 'edit_fixed' }) do
-    api.nvim_buf_clear_namespace(buf, ns_for(buf, name), 0, -1)
+  for _, view in ipairs(views) do
+    api.nvim_buf_clear_namespace(buf, view.ns, 0, -1)
+    api.nvim_buf_clear_namespace(buf, view.ns_fixed, 0, -1)
   end
 end
 
@@ -657,10 +335,12 @@ local function close_split(buf, s)
   end
   s.split = nil
   -- Un-scope namespaces so a later split can re-scope them cleanly.
-  pcall(api.nvim__ns_set, ns_for(buf, 'preview'), { wins = {} })
-  pcall(api.nvim__ns_set, ns_for(buf, 'preview_fixed'), { wins = {} })
-  pcall(api.nvim__ns_set, ns_for(buf, 'edit'), { wins = {} })
-  pcall(api.nvim__ns_set, ns_for(buf, 'edit_fixed'), { wins = {} })
+  for _, view in ipairs(s.views) do
+    if view.wins then
+      pcall(api.nvim__ns_set, view.ns, { wins = {} })
+      pcall(api.nvim__ns_set, view.ns_fixed, { wins = {} })
+    end
+  end
   if api.nvim_win_is_valid(split.src_win) then
     pcall(set_win_option, split.src_win, 'scrollbind', false)
   end
@@ -679,7 +359,7 @@ local function open_split(buf, s)
   local vertical = cfg.position == 'left' or cfg.position == 'right'
   local total = vertical and api.nvim_win_get_width(src_win) or api.nvim_win_get_height(src_win)
   local size = cfg.size < 1 and math.floor(total * cfg.size) or math.floor(cfg.size)
-  local win_cfg = { split = cfg.position, win = src_win, style = nil }
+  local win_cfg = { split = cfg.position, win = src_win }
   if vertical then
     win_cfg.width = size
   else
@@ -738,12 +418,11 @@ local function build_views(buf, s)
     views[1] = {
       ns = ns_for(buf, 'main'),
       ns_fixed = ns_for(buf, 'fixed'),
-      wins = nil,
       hybrid = s.mode == 'live',
     }
   end
   for _, v in ipairs(views) do
-    v.rows, v.raw, v.conditional, v.tick = nil, {}, {}, -1
+    v.raw = {}
   end
   s.views = views
 end
@@ -762,7 +441,7 @@ function M.set_mode(buf, mode)
     mode = 'preview'
   end
   close_split(buf, s)
-  clear_all(buf, s)
+  clear_views(buf, s.views)
   restore_win_options(s)
   s.mode = mode
   s.rendered = nil
@@ -770,7 +449,10 @@ function M.set_mode(buf, mode)
     open_split(buf, s)
   end
   build_views(buf, s)
-  M.ensure_win_options(buf, s)
+  if not s.enabled then
+    -- Selecting a mode updates window options even when marks are disabled.
+    ensure_win_options(s, vim.fn.win_findbuf(buf), config.get())
+  end
   M.render(buf, true)
 end
 
@@ -845,7 +527,8 @@ function M.attach(buf)
   if name ~= '' and vim.fn.getfsize(name) > cfg.max_file_size then
     return false
   end
-  if not ts.parser(buf) then
+  local parser = ts.parser(buf)
+  if not parser then
     vim.notify_once('markvim: no markdown treesitter parser available', vim.log.levels.WARN)
     return false
   end
@@ -860,6 +543,7 @@ function M.attach(buf)
   end
 
   local s = state.new(buf)
+  s.parser = parser
   for _, win in ipairs(vim.fn.win_findbuf(buf)) do
     if util.is_float(win) then
       s.float = true
@@ -929,7 +613,7 @@ function M.detach(buf)
     return
   end
   close_split(buf, s)
-  clear_all(buf, s)
+  clear_views(buf, s.views)
   restore_win_options(s)
   if s.open_key then
     pcall(vim.keymap.del, 'n', s.open_key, { buffer = buf })
@@ -957,7 +641,6 @@ function M.set_enabled(buf, enabled)
   if enabled then
     s.enabled = true
     s.rendered = nil
-    M.ensure_win_options(buf, s)
     M.render(buf, true)
   else
     s.enabled = false
@@ -965,7 +648,7 @@ function M.set_enabled(buf, enabled)
       s.timer:stop()
     end
     close_split(buf, s)
-    clear_all(buf, s)
+    clear_views(buf, s.views)
     restore_win_options(s)
     s.rendered = nil
     if s.mode == 'split' then
@@ -990,7 +673,5 @@ function M.invalidate(buf)
     M.schedule(buf, 0)
   end
 end
-
-M._compute = compute -- exposed for tests and benchmarks
 
 return M

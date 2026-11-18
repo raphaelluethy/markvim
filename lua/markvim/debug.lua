@@ -11,17 +11,17 @@ function M.show(buf)
   local lines = {
     ('markvim buffer %d: enabled=%s mode=%s float=%s views=%d'):format(buf, s.enabled, s.mode, s.float, #s.views),
   }
-  local st = s.stats or {}
+  local st = s.stats
   if st.compute_ms then
     lines[#lines + 1] = ('last render: total %.2fms = viewport %.2f + compute %.2f (parse %.2f, inline %.2f, elements %.2f) + apply %.2f; %d marks, ranges %s'):format(
       st.total_ms,
       st.viewport_ms,
       st.compute_ms,
-      (st.phases or {}).parse or 0,
-      (st.phases or {}).inline_parse or 0,
-      (st.phases or {}).elements or 0,
+      st.phases.parse,
+      st.phases.inline_parse,
+      st.phases.elements,
       st.apply_ms,
-      st.marks or 0,
+      st.marks,
       vim.inspect(st.ranges, { newline = '', indent = '' })
     )
   end
@@ -32,14 +32,10 @@ function M.show(buf)
     lines[#lines + 1] = ('view ns=%d hybrid=%s raw=%s marks on cursor row: %d main, %d fixed'):format(
       v.ns,
       v.hybrid,
-      vim.inspect(vim.tbl_keys(v.raw or {}), { newline = '', indent = '' }),
+      vim.inspect(vim.tbl_keys(v.raw), { newline = '', indent = '' }),
       n_main,
       n_fixed
     )
-  end
-  local pending = vim.tbl_keys(s.diagrams or {})
-  if #pending > 0 then
-    lines[#lines + 1] = 'pending diagrams: ' .. #pending
   end
   print(table.concat(lines, '\n'))
 end

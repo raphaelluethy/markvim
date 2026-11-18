@@ -22,15 +22,7 @@ function M.fill(s, width)
   return out
 end
 
----Pad string with spaces on the right to display width `width`.
-function M.rpad(s, width)
-  local w = api.nvim_strwidth(s)
-  if w >= width then
-    return s
-  end
-  return s .. (' '):rep(width - w)
-end
-
+---Pad with spaces on the left to reach the given display width.
 function M.lpad(s, width)
   local w = api.nvim_strwidth(s)
   if w >= width then
@@ -59,15 +51,6 @@ end
 ---Monotonic clock in milliseconds.
 function M.now()
   return vim.uv.hrtime() / 1e6
-end
-
----Shallow copy a table.
-function M.copy(t)
-  local out = {}
-  for k, v in pairs(t) do
-    out[k] = v
-  end
-  return out
 end
 
 ---Capitalize the first letter.

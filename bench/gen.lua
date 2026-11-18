@@ -8,7 +8,7 @@ for i = 1, n do
   add(('# Section %d'):format(i))
   add('')
   add(('Paragraph with **bold**, *italic*, `code`, ~~strike~~ and a [link](https://example.com/%d).'):format(i))
-  add('Another line with <https://autolink.example> and ![image](img%d.png) and [[wiki|alias]].')
+  add(('Another line with <https://autolink.example> and ![image](img%d.png) and [[wiki|alias]].'):format(i))
   add('')
   add('## Lists')
   add('- item one with `inline code`')

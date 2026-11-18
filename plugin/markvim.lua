@@ -30,7 +30,7 @@ end, {
   nargs = '*',
   bang = true,
   desc = 'markvim: enable | disable | toggle | live | preview | split | render | debug',
-  complete = function(arg_lead, cmd_line, cursor_pos)
-    return require('markvim.command').complete(arg_lead, cmd_line, cursor_pos)
+  complete = function(arg_lead, cmd_line)
+    return require('markvim.command').complete(arg_lead, cmd_line)
   end,
 })

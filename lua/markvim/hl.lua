@@ -22,7 +22,6 @@ local links = {
   MarkvimQuote = '@markup.quote.markdown',
   MarkvimRule = 'LineNr',
   MarkvimTable = '@punctuation.special.markdown',
-  MarkvimTableHead = '@markup.heading.markdown',
   MarkvimLink = '@markup.link.label.markdown_inline',
   MarkvimUrl = '@markup.link.url.markdown_inline',
   MarkvimImage = '@markup.link.label.markdown_inline',
@@ -84,13 +83,17 @@ local function define_backgrounds()
   end
 end
 
+local function define_links()
+  for name, target in pairs(links) do
+    api.nvim_set_hl(0, name, { link = target, default = true })
+  end
+end
+
 local defined = false
 
 ---Define all highlight groups. Safe to call repeatedly (ColorScheme).
 function M.setup()
-  for name, target in pairs(links) do
-    api.nvim_set_hl(0, name, { link = target, default = true })
-  end
+  define_links()
   define_backgrounds()
   if not defined then
     defined = true
@@ -99,9 +102,7 @@ function M.setup()
       callback = function()
         -- Links survive a colorscheme change only if the scheme does not clear
         -- them; re-apply everything (cheap).
-        for name, target in pairs(links) do
-          api.nvim_set_hl(0, name, { link = target, default = true })
-        end
+        define_links()
         -- Backgrounds are computed from the new palette: force-redefine.
         for i = 1, 6 do
           api.nvim_set_hl(0, 'MarkvimH' .. i .. 'Bg', {})
@@ -112,40 +113,41 @@ function M.setup()
   end
 end
 
+local callouts = {
+  note = 'MarkvimCalloutNote',
+  info = 'MarkvimCalloutNote',
+  abstract = 'MarkvimCalloutNote',
+  summary = 'MarkvimCalloutNote',
+  tldr = 'MarkvimCalloutNote',
+  todo = 'MarkvimCalloutNote',
+  tip = 'MarkvimCalloutTip',
+  hint = 'MarkvimCalloutTip',
+  success = 'MarkvimCalloutTip',
+  check = 'MarkvimCalloutTip',
+  done = 'MarkvimCalloutTip',
+  important = 'MarkvimCalloutImportant',
+  example = 'MarkvimCalloutImportant',
+  warning = 'MarkvimCalloutWarning',
+  caution = 'MarkvimCalloutCaution',
+  attention = 'MarkvimCalloutWarning',
+  question = 'MarkvimCalloutQuestion',
+  help = 'MarkvimCalloutQuestion',
+  faq = 'MarkvimCalloutQuestion',
+  failure = 'MarkvimCalloutCaution',
+  fail = 'MarkvimCalloutCaution',
+  missing = 'MarkvimCalloutCaution',
+  danger = 'MarkvimCalloutCaution',
+  error = 'MarkvimCalloutCaution',
+  bug = 'MarkvimCalloutCaution',
+  quote = 'MarkvimCalloutQuote',
+  cite = 'MarkvimCalloutQuote',
+}
+
 ---Highlight group name for a callout type (falls back to Note).
 ---@param kind string lower-case callout name
 ---@return string
 function M.callout(kind)
-  local map = {
-    note = 'MarkvimCalloutNote',
-    info = 'MarkvimCalloutNote',
-    abstract = 'MarkvimCalloutNote',
-    summary = 'MarkvimCalloutNote',
-    tldr = 'MarkvimCalloutNote',
-    todo = 'MarkvimCalloutNote',
-    tip = 'MarkvimCalloutTip',
-    hint = 'MarkvimCalloutTip',
-    success = 'MarkvimCalloutTip',
-    check = 'MarkvimCalloutTip',
-    done = 'MarkvimCalloutTip',
-    important = 'MarkvimCalloutImportant',
-    example = 'MarkvimCalloutImportant',
-    warning = 'MarkvimCalloutWarning',
-    caution = 'MarkvimCalloutCaution',
-    attention = 'MarkvimCalloutWarning',
-    question = 'MarkvimCalloutQuestion',
-    help = 'MarkvimCalloutQuestion',
-    faq = 'MarkvimCalloutQuestion',
-    failure = 'MarkvimCalloutCaution',
-    fail = 'MarkvimCalloutCaution',
-    missing = 'MarkvimCalloutCaution',
-    danger = 'MarkvimCalloutCaution',
-    error = 'MarkvimCalloutCaution',
-    bug = 'MarkvimCalloutCaution',
-    quote = 'MarkvimCalloutQuote',
-    cite = 'MarkvimCalloutQuote',
-  }
-  return map[kind] or 'MarkvimCalloutNote'
+  return callouts[kind] or 'MarkvimCalloutNote'
 end
 
 return M

@@ -2,13 +2,6 @@ local util = require('markvim.util')
 local ts = require('markvim.ts')
 local M = {}
 
-local function conceal(ctx, row, scol, ecol)
-  if ecol > scol then
-    ctx.add(row, scol, { end_col = ecol, conceal = '' })
-    ctx.adjust(row, scol, -(ecol - scol))
-  end
-end
-
 local function icon_at(ctx, row, col, icon, hl)
   if ctx.cfg.link.icons and icon and icon ~= '' then
     ctx.add(row, col, { virt_text = { { icon, hl } }, virt_text_pos = 'inline' })
@@ -54,8 +47,8 @@ function M.link(ctx, node)
     return
   end
   local _, tsc, _, tec = text:range()
-  conceal(ctx, sr, sc, tsc)
-  conceal(ctx, sr, tec, ec)
+  ctx.conceal(sr, sc, tsc)
+  ctx.conceal(sr, tec, ec)
   ctx.add(sr, tsc, { end_col = tec, hl_group = 'MarkvimLink' })
   icon_at(ctx, sr, sc, icon_for(ctx, dest and ts.text(ctx, dest) or nil), 'MarkvimLink')
 end
@@ -71,11 +64,11 @@ function M.image(ctx, node)
   local desc = c.image_description
   if desc then
     local _, dsc, _, dec = desc:range()
-    conceal(ctx, sr, sc, dsc)
-    conceal(ctx, sr, dec, ec)
+    ctx.conceal(sr, sc, dsc)
+    ctx.conceal(sr, dec, ec)
     ctx.add(sr, dsc, { end_col = dec, hl_group = 'MarkvimImage' })
   else
-    conceal(ctx, sr, sc, ec)
+    ctx.conceal(sr, sc, ec)
   end
   icon_at(ctx, sr, sc, ctx.icons.image, 'MarkvimImage')
 end
@@ -100,11 +93,11 @@ function M.shortcut(ctx, node)
   end
   if line:sub(sc, sc) == '[' and line:sub(ec + 1, ec + 1) == ']' then
     -- [[wiki link]] or [[target|alias]]
-    conceal(ctx, sr, sc - 1, tsc)
-    conceal(ctx, sr, tec, ec + 1)
+    ctx.conceal(sr, sc - 1, tsc)
+    ctx.conceal(sr, tec, ec + 1)
     local bar = inner:find('|', 1, true)
     if bar then
-      conceal(ctx, sr, tsc, tsc + bar)
+      ctx.conceal(sr, tsc, tsc + bar)
       ctx.add(sr, tsc + bar, { end_col = tec, hl_group = 'MarkvimLink' })
     else
       ctx.add(sr, tsc, { end_col = tec, hl_group = 'MarkvimLink' })
@@ -114,14 +107,14 @@ function M.shortcut(ctx, node)
   end
   if inner:sub(1, 1) == '^' then
     -- footnote reference [^1]
-    conceal(ctx, sr, sc, tsc + 1)
-    conceal(ctx, sr, tec, ec)
+    ctx.conceal(sr, sc, tsc + 1)
+    ctx.conceal(sr, tec, ec)
     ctx.add(sr, tsc + 1, { end_col = tec, hl_group = 'MarkvimLink' })
     icon_at(ctx, sr, sc, ctx.icons.footnote, 'MarkvimLink')
     return
   end
-  conceal(ctx, sr, sc, tsc)
-  conceal(ctx, sr, tec, ec)
+  ctx.conceal(sr, sc, tsc)
+  ctx.conceal(sr, tec, ec)
   ctx.add(sr, tsc, { end_col = tec, hl_group = 'MarkvimLink' })
   icon_at(ctx, sr, sc, ctx.icons.link, 'MarkvimLink')
 end
@@ -139,8 +132,8 @@ function M.ref_link(ctx, node)
     return
   end
   local _, tsc, _, tec = text:range()
-  conceal(ctx, sr, sc, tsc)
-  conceal(ctx, sr, tec, ec)
+  ctx.conceal(sr, sc, tsc)
+  ctx.conceal(sr, tec, ec)
   ctx.add(sr, tsc, { end_col = tec, hl_group = 'MarkvimLink' })
   icon_at(ctx, sr, sc, ctx.icons.link, 'MarkvimLink')
 end
@@ -152,8 +145,8 @@ function M.autolink(ctx, node)
   if sr ~= er then
     return
   end
-  conceal(ctx, sr, sc, sc + 1)
-  conceal(ctx, sr, ec - 1, ec)
+  ctx.conceal(sr, sc, sc + 1)
+  ctx.conceal(sr, ec - 1, ec)
   ctx.add(sr, sc + 1, { end_col = ec - 1, hl_group = 'MarkvimUrl' })
   local icon = node:type() == 'email_autolink' and ctx.icons.email or ctx.icons.web
   icon_at(ctx, sr, sc, icon, 'MarkvimLink')

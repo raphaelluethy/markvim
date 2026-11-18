@@ -240,7 +240,6 @@ All groups are defined with `default = true` links and can be overridden:
   MarkvimQuote                 @markup.quote.markdown
   MarkvimRule                  LineNr
   MarkvimTable                 @punctuation.special.markdown
-  MarkvimTableHead             @markup.heading.markdown
   MarkvimLink/Image            @markup.link.label.markdown_inline
   MarkvimUrl                   @markup.link.url.markdown_inline
   MarkvimStrike                @markup.strikethrough.markdown_inline

@@ -4,7 +4,7 @@
 
 Render markdown in-buffer with minimal overhead, support live/preview/split
 modes, attach to any markdown buffer (files, LSP floats, chat UIs), render
-diagrams, use the user's colorscheme, and load lazily. Neovim 0.12 only.
+diagrams, use the user's colorscheme, and load lazily. Requires Neovim 0.12 or newer.
 
 ## Rendering model
 
@@ -16,10 +16,12 @@ events ──► render.render(buf)
              └  apply():    per view: clear ns, set extmarks (skip raw rows)
 ```
 
-* **Elements** live in `lua/markvim/elements/*.lua`, one function per treesitter
-  capture, loaded on first use. They only append marks to the context
-  (`ctx.add` = anti-concealable, `ctx.fix` = always visible) and record width
-  adjustments (`ctx.adjust`) that tables use to align cells after conceals.
+* **Mark computation** lives in `lua/markvim/compute.lua`. It builds queries
+  for enabled Markdown sections and calls the element functions in
+  `lua/markvim/elements/`. Elements record marks in the context
+  (`ctx.add` for marks hidden on raw rows and `ctx.fix` for always-visible
+  marks) and width adjustments that tables use to align cells after conceals.
+  `render.lua` applies those marks and manages buffers and windows.
 * **Marks** are persistent extmarks. Each *view* owns two namespaces: `ns`
   (conceals, icons, overlays; removed on the cursor row in live mode) and
   `ns_fixed` (backgrounds, virtual lines; always shown).
@@ -66,9 +68,9 @@ latency in large documents.
 
 Neovim's bundled markdown highlight query already conceals inline delimiters,
 link syntax and (with `conceal_lines`) fence lines. markvim re-emits the
-conceals it depends on (so width calculations are exact) and, for
-`code.border='thin'`, rewrites the runtime query at load time to keep fence
-lines (`compat.lua`).
+conceals it depends on (so width calculations are exact). When
+`code.border` is `hide` or `thin`, `compat.lua` removes the runtime query's
+fence-line conceals so markvim can decide how to display each fence.
 
 ## Diagrams
 

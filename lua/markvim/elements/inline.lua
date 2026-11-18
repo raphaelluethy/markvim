@@ -1,12 +1,5 @@
 local M = {}
 
-local function conceal(ctx, row, scol, ecol)
-  if ecol > scol then
-    ctx.add(row, scol, { end_col = ecol, conceal = '' })
-    ctx.adjust(row, scol, -(ecol - scol))
-  end
-end
-
 -- Delimiters come as one node per character (`**` is two nodes); merge
 -- adjacent ones into a single conceal mark.
 local function conceal_delimiters(ctx, node, kind, hl)
@@ -20,7 +13,7 @@ local function conceal_delimiters(ctx, node, kind, hl)
           pend = dec
         else
           if prow then
-            conceal(ctx, prow, pstart, pend)
+            ctx.conceal(prow, pstart, pend)
           end
           prow, pstart, pend = dsr, dsc, dec
         end
@@ -28,7 +21,7 @@ local function conceal_delimiters(ctx, node, kind, hl)
     end
   end
   if prow then
-    conceal(ctx, prow, pstart, pend)
+    ctx.conceal(prow, pstart, pend)
   end
   if hl and sr == er then
     ctx.add(sr, sc, { end_col = ec, hl_group = hl })
@@ -42,10 +35,6 @@ function M.code_span(ctx, node)
 end
 
 function M.emphasis(ctx, node)
-  conceal_delimiters(ctx, node, 'emphasis_delimiter')
-end
-
-function M.strong(ctx, node)
   conceal_delimiters(ctx, node, 'emphasis_delimiter')
 end
 
@@ -93,7 +82,7 @@ end
 
 function M.escape(ctx, node)
   local sr, sc = node:range()
-  conceal(ctx, sr, sc, sc + 1)
+  ctx.conceal(sr, sc, sc + 1)
 end
 
 function M.latex(ctx, node)
@@ -109,7 +98,7 @@ function M.html_tag(ctx, node)
   end
   local sr, sc, er, ec = node:range()
   if sr == er then
-    conceal(ctx, sr, sc, ec)
+    ctx.conceal(sr, sc, ec)
   end
 end
 

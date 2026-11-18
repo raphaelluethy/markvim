@@ -1,27 +1,11 @@
--- Treesitter helpers: parser access and compiled query cache.
+-- Tree-sitter helpers for Markdown nodes.
 local M = {}
-
-local query_cache = {}
 
 ---@param buf integer
 ---@return vim.treesitter.LanguageTree|nil
 function M.parser(buf)
   local parser = vim.treesitter.get_parser(buf, 'markdown', { error = false })
   return parser or nil
-end
-
----Compile (once) and return a query.
----@param lang string
----@param src string
----@return vim.treesitter.Query
-function M.query(lang, src)
-  local key = lang .. '\0' .. src
-  local q = query_cache[key]
-  if not q then
-    q = vim.treesitter.query.parse(lang, src)
-    query_cache[key] = q
-  end
-  return q
 end
 
 ---Nesting depth of a node counted by ancestors of the given type.

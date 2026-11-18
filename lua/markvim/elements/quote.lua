@@ -56,9 +56,6 @@ function M.quote(ctx, node)
     end
   end
 
-  if not ctx.cfg.quote.enabled then
-    return
-  end
   local bar = ctx.icons.quote
   for row = sr, last do
     local line = row == sr and first or ctx.line(row)

@@ -13,19 +13,19 @@ end
 ---@param opts markvim.Config|nil
 function M.setup(opts)
   local config = require('markvim.config')
-  config.setup(opts)
+  local cfg = config.setup(opts)
   -- Re-register the FileType autocmd in case `filetypes` changed.
   local group = vim.api.nvim_create_augroup('markvim.attach', { clear = true })
   vim.api.nvim_create_autocmd('FileType', {
     group = group,
-    pattern = config.get().filetypes,
+    pattern = cfg.filetypes,
     callback = function(ev)
       M.attach(ev.buf)
     end,
   })
   -- Attach to already-open buffers of the configured filetypes.
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(buf) and vim.tbl_contains(config.get().filetypes, vim.bo[buf].filetype) then
+    if vim.api.nvim_buf_is_loaded(buf) and vim.tbl_contains(cfg.filetypes, vim.bo[buf].filetype) then
       M.attach(buf)
     end
   end

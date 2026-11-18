@@ -6,11 +6,16 @@ local uv = vim.uv
 local config = require('markvim.config')
 local renderers = require('markvim.diagram.renderers')
 local state = require('markvim.state')
-local util = require('markvim.util')
 
 local M = {}
 
 local MAX_JOBS = 2
+
+---@class markvim.DiagramBlock
+---@field top integer
+---@field bottom integer
+---@field lang string
+---@field entry markvim.DiagramEntry
 
 ---@class markvim.DiagramEntry
 ---@field status 'pending'|'ready'|'error'
@@ -43,11 +48,6 @@ local function error_line(msg)
   return msg:match('[^\n]+') or msg
 end
 
-local function node_prefix()
-  return vim.fn.stdpath('data') .. '/markvim'
-end
-renderers.set_prefix(node_prefix)
-
 local function cache_dir()
   local dir = config.get().diagram.cache_dir or (vim.fn.stdpath('cache') .. '/markvim')
   if not uv.fs_stat(dir) then
@@ -72,14 +72,14 @@ local function write_file(path, data)
   if not fd then
     return false
   end
-  uv.fs_write(fd, data, 0)
+  local written = uv.fs_write(fd, data, 0)
   uv.fs_close(fd)
-  return true
+  return written == #data
 end
 
 ---Width/height of a PNG from its IHDR chunk.
 ---@return integer|nil, integer|nil
-function M.png_size(path)
+local function png_size(path)
   local fd = uv.fs_open(path, 'r', 438)
   if not fd then
     return nil
@@ -115,12 +115,10 @@ local function finish(key, entry)
   entry.status = entry.err and 'error' or 'ready'
   local bufs = waiting[key]
   waiting[key] = nil
-  if bufs then
-    local render = require('markvim.render')
-    for buf in pairs(bufs) do
-      if api.nvim_buf_is_valid(buf) then
-        render.invalidate(buf)
-      end
+  local render = require('markvim.render')
+  for buf in pairs(bufs) do
+    if api.nvim_buf_is_valid(buf) then
+      render.invalidate(buf)
     end
   end
 end
@@ -138,85 +136,72 @@ end
 
 ---@param spec markvim.Renderer
 ---@param opts markvim.RenderOpts
-local function run(key, spec, opts, entry, out_base)
-  local cfg = config.get().diagram
-  local env = { MARKVIM_NODE_PREFIX = opts.node_prefix }
-  for k, v in pairs(spec.env or {}) do
-    env[k] = v
-  end
-  local sysopts = function(stdin, text)
-    return { stdin = stdin, text = text, timeout = cfg.timeout, env = env, cwd = cache_dir() }
-  end
+local function run(key, spec, opts, entry, path)
+  local timeout = config.get().diagram.timeout
+  local cwd = vim.fs.dirname(opts.out)
+  local env = vim.tbl_extend('force', { MARKVIM_NODE_PREFIX = opts.node_prefix }, spec.env or {})
   local function done(err)
     running = running - 1
     entry.err = err
+    -- Start the next job outside the caller, including synchronous spawn errors.
     vim.schedule(function()
       finish(key, entry)
       next_job()
     end)
   end
+
   local function collect(stdout)
-    local ext = spec.ext or (spec.kind == 'text' and 'txt' or 'png')
-    local path = out_base .. '.' .. ext
-    if spec.output == 'stdout' then
-      if spec.kind == 'text' then
-        entry.lines = split_lines(stdout)
+    if spec.kind == 'text' then
+      local text = spec.output == 'stdout' and stdout or read_file(path)
+      if not text then
+        return done('renderer produced no output')
+      end
+      entry.lines = split_lines(text)
+      if spec.output == 'stdout' then
         write_file(path, table.concat(entry.lines, '\n'))
-      else
-        if not write_file(path, stdout) then
-          return done('cannot write ' .. path)
-        end
       end
     else
-      if spec.kind == 'text' then
-        local data = read_file(path)
-        if not data then
-          return done('renderer produced no output')
-        end
-        entry.lines = split_lines(data)
+      if spec.output == 'stdout' and not write_file(path, stdout) then
+        return done('cannot write ' .. path)
       end
-    end
-    if spec.kind == 'image' then
-      entry.path = path
-      entry.width, entry.height = M.png_size(path)
+      entry.width, entry.height = png_size(path)
       if not entry.width then
         return done('renderer produced no PNG')
       end
+      entry.path = path
     end
-    done(nil)
+    done()
   end
-  local ok, err = pcall(function()
-    vim.system(
-      spec.cmd(opts),
-      sysopts(spec.stdin ~= false and opts.src or nil, spec.kind == 'text' and not spec.post),
-      function(res)
-        if res.code ~= 0 then
-          local msg = (res.stderr or ''):gsub('%s+$', '')
-          msg = msg ~= '' and msg or ('exit code ' .. res.code)
-          return done(error_line(msg))
-        end
-        if spec.post then
-          local post_ok, post_err = pcall(function()
-            vim.system(spec.post(opts), sysopts(res.stdout, false), function(res2)
-              if res2.code ~= 0 then
-                local msg = (res2.stderr or ''):gsub('%s+$', '')
-                return done(msg ~= '' and error_line(msg) or ('exit code ' .. res2.code))
-              end
-              collect(res2.stdout)
-            end)
-          end)
-          if not post_ok then
-            done(tostring(post_err))
+
+  local function spawn(command, stdin, text, on_success)
+    local ok, err = pcall(function()
+      vim.system(
+        command(opts),
+        { stdin = stdin, text = text, timeout = timeout, env = env, cwd = cwd },
+        vim.schedule_wrap(function(result)
+          if result.code ~= 0 then
+            local message = vim.trim(result.stderr or '')
+            return done(message == '' and ('exit code ' .. result.code) or error_line(message))
           end
-          return
-        end
-        collect(res.stdout or '')
-      end
-    )
-  end)
-  if not ok then
-    done(tostring(err))
+          on_success(result.stdout or '')
+        end)
+      )
+    end)
+    if not ok then
+      done(tostring(err))
+    end
   end
+
+  local function postprocess(svg)
+    spawn(spec.post, svg, false, collect)
+  end
+
+  spawn(
+    spec.cmd,
+    spec.stdin ~= false and opts.src or nil,
+    spec.kind == 'text' and not spec.post,
+    spec.post and postprocess or collect
+  )
 end
 
 local function normal_fg()
@@ -233,7 +218,7 @@ end
 ---@param ctx markvim.Ctx
 ---@param width integer
 ---@return markvim.DiagramEntry
-function M.get(spec, src, ctx, width)
+local function get(spec, src, ctx, width)
   local dark = vim.o.background == 'dark'
   local ascii = ctx.cfg.icons == 'ascii'
   local key_src = table.concat({
@@ -249,7 +234,6 @@ function M.get(spec, src, ctx, width)
   local entry = cache[key]
   if entry then
     if entry.status == 'pending' then
-      waiting[key] = waiting[key] or {}
       waiting[key][ctx.buf] = true
     end
     return entry
@@ -269,7 +253,7 @@ function M.get(spec, src, ctx, width)
         return entry
       end
     else
-      entry.width, entry.height = M.png_size(path)
+      entry.width, entry.height = png_size(path)
       if entry.width then
         entry.path = path
         entry.status = 'ready'
@@ -286,27 +270,23 @@ function M.get(spec, src, ctx, width)
     fg = normal_fg(),
     ascii = ascii,
     script = script,
-    node_prefix = node_prefix(),
+    node_prefix = renderers.node_prefix,
     text = ctx.cfg.diagram.text,
   }
   queue[#queue + 1] = function()
-    run(key, spec, opts, entry, out_base)
+    run(key, spec, opts, entry, path)
   end
   next_job()
   return entry
 end
 
----Pick the backend kind for the current configuration/terminal.
----@return 'text'|'image'|nil
-local function backend(cfg)
-  local b = cfg.backend
-  if b == 'none' then
-    return nil
-  end
-  if b == 'auto' or b == 'image' then
+---Pick the backend kind for an enabled diagram.
+---@return 'text'|'image'
+local function backend(configured)
+  if configured == 'auto' or configured == 'image' then
     return require('markvim.image').available() and 'image' or 'text'
   end
-  return b
+  return configured
 end
 
 local function is_fence(line)
@@ -318,12 +298,11 @@ end
 ---@param ctx markvim.Ctx
 ---@param node TSNode
 ---@param lang string
----@param rows {top: integer, bottom: integer, first: integer, last: integer, has_close: boolean}
+---@param rows {top: integer, bottom: integer, first: integer, last: integer}
 ---@return boolean
 function M.render_block(ctx, node, lang, rows)
   local cfg = ctx.cfg.diagram
-  local langs = cfg.languages[lang]
-  if not langs or rows.first > rows.last then
+  if rows.first > rows.last then
     return false
   end
   local src_lines = {}
@@ -334,13 +313,10 @@ function M.render_block(ctx, node, lang, rows)
   if src:match('^%s*$') then
     return false
   end
-  local kind = backend(cfg)
-  if not kind then
-    return false
-  end
+  local langs = cfg.languages[lang]
+  local kind = backend(cfg.backend)
   local spec = renderers.pick(langs[kind] or {}, kind)
   if not spec and kind == 'image' then
-    kind = 'text'
     spec = renderers.pick(langs.text or {}, 'text')
   end
   if not spec then
@@ -348,9 +324,8 @@ function M.render_block(ctx, node, lang, rows)
   end
   local _, indent = node:range()
   local width = math.max(20, ctx.width - indent)
-  local entry = M.get(spec, src, ctx, width)
+  local entry = get(spec, src, ctx, width)
   ctx.raw_blocks[#ctx.raw_blocks + 1] = { rows.top, rows.bottom }
-  ctx.blocks[#ctx.blocks + 1] = { rows.top, rows.bottom }
 
   if entry.status ~= 'ready' then
     local label
@@ -376,10 +351,8 @@ function M.render_block(ctx, node, lang, rows)
         art_w = w
       end
     end
-    local block = { top = rows.top, bottom = rows.bottom, lang = lang, entry = entry }
-    ctx.diagrams[#ctx.diagrams + 1] = block
+    ctx.diagram_blocks[#ctx.diagram_blocks + 1] = { top = rows.top, bottom = rows.bottom, lang = lang, entry = entry }
     if cfg.overflow == 'panel' and (#entry.lines > max or art_w > width) then
-      block.large = true
       local key = cfg.keys and cfg.keys.open
       local hint = key and (' · ' .. key .. ' to open') or ' · :Markvim open'
       virt[1] = {
@@ -464,24 +437,20 @@ local function fallback_panel(title, lines)
       pcall(api.nvim_win_close, win, true)
     end, { buffer = buf, nowait = true })
   end
-  return { buf = buf, win = win }
 end
 
 ---Open the rendered art of a diagram in a floating panel (panels.nvim when
 ---installed, else a plain float).
 ---@param buf integer
----@param block {lang: string, entry: table}
-function M.open(buf, block)
-  local s = state.get(buf)
+---@param s markvim.BufState
+---@param block markvim.DiagramBlock
+local function open(buf, s, block)
   local entry = block.entry
-  if entry.kind ~= 'text' or not entry.lines then
-    return vim.notify('markvim: only text diagrams can be opened in a panel', vim.log.levels.INFO)
-  end
   local title = block.lang .. ' diagram'
   local ok, panels = pcall(require, 'panels')
   if ok then
     -- One panel per buffer: opening the same id again updates and shows it.
-    local panel = panels.open({
+    s.panel = panels.open({
       id = 'markvim:diagram:' .. buf,
       label = 'markvim:diagram',
       title = title,
@@ -489,12 +458,9 @@ function M.open(buf, block)
       wrap = false,
       focus = true,
     })
-    if s then
-      s.panel = panel
-    end
-    return panel
+  else
+    fallback_panel(title, entry.lines)
   end
-  return fallback_panel(title, entry.lines)
 end
 
 ---Open the diagram at a row (the block itself or its neighbouring rows).
@@ -509,7 +475,7 @@ function M.open_at(buf, row)
   row = row or (api.nvim_win_get_cursor(0)[1] - 1)
   for _, block in ipairs(s.diagram_blocks or {}) do
     if row >= block.top - 1 and row <= block.bottom + 1 then
-      M.open(buf, block)
+      open(buf, s, block)
       return true
     end
   end
@@ -528,7 +494,7 @@ function M.install(what)
     vim.notify('markvim: npm not found; install Node.js first', vim.log.levels.ERROR)
     return
   end
-  local prefix = node_prefix()
+  local prefix = renderers.node_prefix
   vim.fn.mkdir(prefix, 'p')
   vim.notify('markvim: installing pele and beautiful-mermaid into ' .. prefix .. ' …', vim.log.levels.INFO)
   vim.system(
@@ -539,7 +505,7 @@ function M.install(what)
         if res.code == 0 then
           renderers.reset_cache()
           vim.notify('markvim: node renderers installed', vim.log.levels.INFO)
-          for buf in pairs(require('markvim.state').buffers) do
+          for buf in pairs(state.buffers) do
             require('markvim.render').invalidate(buf)
           end
         else
@@ -550,13 +516,6 @@ function M.install(what)
   )
 end
 
----Drop in-memory cache (disk cache stays). Used by tests.
-function M.clear()
-  cache = {}
-  waiting = {}
-end
-
-M._cache = cache
 M.renderers = renderers
 
 return M

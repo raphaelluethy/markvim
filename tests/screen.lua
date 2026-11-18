@@ -33,7 +33,7 @@ function M.run(opts)
   local setup = opts.setup or 'require("markvim").setup({})'
   local init = ('set rtp^=%s | set rtp+=%s/after | lua %s'):format(root, root, setup)
   local cmd = {
-    'nvim',
+    vim.v.progpath,
     '--clean',
     '-u',
     'NONE',
@@ -96,7 +96,8 @@ function M.run(opts)
   return snaps
 end
 
-if arg and arg[0] and arg[0]:match('screen%.lua$') then
+local script = debug.getinfo(1, 'S').source:sub(2)
+if arg and arg[0] and vim.fn.fnamemodify(arg[0], ':p') == vim.fn.fnamemodify(script, ':p') then
   local keys = {}
   for i = 5, #arg do
     keys[#keys + 1] = arg[i]

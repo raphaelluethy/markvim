@@ -2,7 +2,7 @@
 -- `ascii` is the lowest common denominator.
 local M = {}
 
-M.sets = {
+local sets = {
   nerd = {
     heading = { '󰲡 ', '󰲣 ', '󰲥 ', '󰲧 ', '󰲩 ', '󰲫 ' },
     bullet = { '•', '◦', '▪' },
@@ -18,7 +18,6 @@ M.sets = {
     quote = '▋',
     rule = '─',
     hard_break = '↵',
-    code = '󰅩 ',
     diagram = '󱁉 ',
     pending = '󰔟 ',
     error = '󰅙 ',
@@ -64,7 +63,6 @@ M.sets = {
       r = '┤',
       x = '┼',
     },
-    border = { h = '─', tl = '╭', tr = '╮', bl = '╰', br = '╯' },
   },
   unicode = {
     heading = { '◉ ', '○ ', '✸ ', '✿ ', '▶ ', '▷ ' },
@@ -81,7 +79,6 @@ M.sets = {
     quote = '▋',
     rule = '─',
     hard_break = '↵',
-    code = '',
     diagram = '◆ ',
     pending = '… ',
     error = '✗ ',
@@ -127,10 +124,8 @@ M.sets = {
       r = '┤',
       x = '┼',
     },
-    border = { h = '─', tl = '╭', tr = '╮', bl = '╰', br = '╯' },
   },
   ascii = {
-    heading = { '# ', '## ', '### ', '#### ', '##### ', '###### ' },
     bullet = { '*', '-', '+', '.' },
     unchecked = '[ ]',
     checked = '[x]',
@@ -144,19 +139,17 @@ M.sets = {
     quote = '|',
     rule = '-',
     hard_break = '\\',
-    code = '',
     diagram = '',
     pending = '... ',
     error = 'x ',
     callout = {},
     table = { h = '-', v = '|', tl = '+', tr = '+', bl = '+', br = '+', t = '+', b = '+', l = '+', r = '+', x = '+' },
-    border = { h = '-', tl = '+', tr = '+', bl = '+', br = '+' },
   },
 }
 
 ---@param name 'nerd'|'unicode'|'ascii'
 function M.get(name)
-  return M.sets[name] or M.sets.nerd
+  return sets[name] or sets.nerd
 end
 
 local provider -- cached devicons provider lookup

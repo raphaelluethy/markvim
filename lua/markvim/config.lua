@@ -77,7 +77,7 @@ local defaults = {
   },
   bullet = {
     enabled = true,
-    icons = nil, -- override per nesting level
+    -- Optional icons list overrides the default icons per nesting level.
     ordered = true, -- highlight ordered list markers
   },
   checkbox = {
@@ -152,8 +152,7 @@ local defaults = {
       dot = { text = { 'graph-easy' }, image = { 'dot' } },
       graphviz = { text = { 'graph-easy' }, image = { 'dot' } },
     },
-    -- Directory for cached renderings.
-    cache_dir = nil, -- default: stdpath('cache') .. '/markvim'
+    -- Optional cache_dir overrides stdpath('cache') .. '/markvim'.
   },
   image = {
     -- 'auto' | 'kitty' | false
@@ -161,14 +160,13 @@ local defaults = {
     -- Pixel size of a cell when it cannot be detected.
     cell = { width = 9, height = 18 },
   },
-  -- Called after a buffer is attached.
-  on_attach = nil,
+  -- Optional on_attach callback runs after a buffer is attached.
 }
 
 local M = {}
 
----@type markvim.Config
-M.options = nil
+---@type markvim.Config|nil
+local options
 
 local function validate(opts)
   local ok_modes = { live = true, preview = true, split = true }
@@ -183,19 +181,15 @@ end
 ---@param opts markvim.Config|nil
 function M.setup(opts)
   local user = opts or (type(vim.g.markvim) == 'table' and vim.g.markvim) or {}
-  M.options = vim.tbl_deep_extend('force', {}, defaults, user)
-  validate(M.options)
-  return M.options
+  local merged = vim.tbl_deep_extend('force', {}, defaults, user)
+  validate(merged)
+  options = merged
+  return options
 end
 
 ---@return markvim.Config
 function M.get()
-  if not M.options then
-    M.setup(nil)
-  end
-  return M.options
+  return options or M.setup()
 end
-
-M.defaults = defaults
 
 return M

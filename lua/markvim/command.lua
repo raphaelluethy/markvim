@@ -24,8 +24,7 @@ function M.run(cmd)
       end
     end
     mv.enable(buf)
-    local s = require('markvim.state').get(buf)
-    if s and s.mode == sub and sub ~= 'live' and not cmd.bang then
+    if sub ~= 'live' and not cmd.bang and mv.mode(buf) == sub then
       mv.set_mode('live', buf) -- toggle back
     else
       mv.set_mode(sub, buf)

@@ -401,9 +401,4 @@ function M.placeholder_lines(id, cols, rows, indent)
   return lines
 end
 
----Forget transmitted images (e.g. after the terminal was reset).
-function M.reset()
-  images = {}
-end
-
 return M

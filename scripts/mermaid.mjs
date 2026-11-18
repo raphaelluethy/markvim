@@ -84,11 +84,13 @@ async function load(name) {
 function themeSvg(svg, fg, bg) {
   // librsvg does not resolve CSS custom properties; substitute them.
   const vars = { '--pele-bg': bg, '--pele-fg': fg, '--pele-accent': fg, '--pele-font': options.fontFamily || 'sans-serif' };
-  let out = svg.replace(/var\((--pele-[a-z]+)(?:,\s*[^)]*)?\)/g, (m, name) => vars[name] ?? m);
-  if (!/style="[^"]*--pele-fg/.test(out)) {
-    out = out.replace(/<svg\b/, `<svg style="color:${fg};background:${bg}"`);
-  }
-  return out;
+  const out = svg.replace(/var\((--pele-[a-z]+)(?:,\s*[^)]*)?\)/g, (m, name) => vars[name] ?? m);
+  return out.replace(/<svg\b[^>]*>/, (tag) => {
+    const style = `color:${fg};background:${bg}`;
+    if (/\sstyle="[^"]*--pele-fg/.test(tag)) return tag;
+    if (/\sstyle="/.test(tag)) return tag.replace(/\sstyle="/, ` style="${style};`);
+    return tag.replace('<svg', `<svg style="${style}"`);
+  });
 }
 
 try {

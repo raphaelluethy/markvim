@@ -252,12 +252,36 @@ describe('rules and html', function()
 end)
 
 describe('diagrams', function()
-  it('replaces oversized art with a placeholder and opens it in a panel', function()
-    local diagram = require('markvim.diagram')
-    diagram.clear()
+  local cache_dir = vim.fn.tempname()
+  vim.api.nvim_create_autocmd('VimLeavePre', {
+    once = true,
+    callback = function()
+      vim.fn.delete(cache_dir, 'rf')
+    end,
+  })
+  require('markvim.diagram').renderers.register({
+    name = 'test-echo',
+    kind = 'text',
+    output = 'stdout',
+    available = function()
+      return true
+    end,
+    cmd = function()
+      return { 'cat' }
+    end,
+  })
+
+  local function setup_diagrams(opts)
     require('markvim.config').setup({
-      diagram = { languages = { fake = { text = { 'echo' }, image = {} } }, backend = 'text', max_height = 2 },
+      diagram = vim.tbl_extend('force', {
+        cache_dir = cache_dir,
+        languages = { fake = { text = { 'test-echo' } } },
+      }, opts or {}),
     })
+  end
+
+  it('replaces oversized art with a placeholder and opens it in a panel', function()
+    setup_diagrams({ max_height = 2 })
     local buf = H.buffer({ 'before', '```fake', 'A', 'B', 'C ' .. vim.uv.hrtime(), '```', 'after', 'far away' })
     vim.wait(2000, function()
       return H.has(buf, 0, { lines = 1 }, true)
@@ -271,9 +295,6 @@ describe('diagrams', function()
       { details = true }
     )
     ok(marks[1][4].virt_lines[1][1][1]:find('fake diagram, %d+×3'), 'placeholder text')
-    local blocks = require('markvim.state').get(buf).diagram_blocks
-    eq(1, #blocks, 'diagram registered')
-    ok(blocks[1].large, 'marked large')
     ok(not require('markvim').open_diagram(buf, 7), 'row away from the block does not open')
     local before = #vim.api.nvim_tabpage_list_wins(0)
     ok(require('markvim').open_diagram(buf, 2), 'opens')
@@ -294,11 +315,7 @@ describe('diagrams', function()
     vim.opt.rtp:prepend(panels_path)
     local panels = require('panels')
     panels.setup({ backend = 'float' })
-    local diagram = require('markvim.diagram')
-    diagram.clear()
-    require('markvim.config').setup({
-      diagram = { languages = { fake = { text = { 'echo' }, image = {} } }, backend = 'text', max_height = 2 },
-    })
+    setup_diagrams({ max_height = 2 })
     local buf = H.buffer({ '```fake', 'A', 'B', 'C ' .. vim.uv.hrtime(), '```' })
     vim.wait(2000, function()
       local s = require('markvim.state').get(buf)
@@ -324,12 +341,8 @@ describe('diagrams', function()
     H.cleanup()
   end)
   it('renders text art asynchronously and hides the source', function()
-    local diagram = require('markvim.diagram')
-    diagram.clear()
-    require('markvim.config').setup({
-      diagram = { languages = { fake = { text = { 'echo' }, image = {} } }, backend = 'text' },
-    })
-    -- unique source so the on-disk cache from a previous run does not short-circuit the async path
+    setup_diagrams()
+    -- Keep the source distinct so this test exercises the async path.
     local buf = H.buffer({ 'before', '```fake', 'A --> B', 'B --> C ' .. vim.uv.hrtime(), '```', 'after' })
     -- first render: pending indicator, source rendered as a normal code block
     ok(H.has(buf, 2, { pos = 'eol' }, true), 'pending indicator')
@@ -349,7 +362,6 @@ describe('diagrams', function()
       { details = true }
     )
     eq('A --> B', marks[1][4].virt_lines[1][1][1])
-    os.remove(vim.fn.glob(vim.fn.stdpath('cache') .. '/markvim/*.txt', false, true)[1] or '')
     -- live mode: cursor inside the block reveals the whole source
     require('markvim.render').set_mode(buf, 'live')
     vim.api.nvim_win_set_cursor(0, { 3, 0 })
@@ -358,6 +370,35 @@ describe('diagrams', function()
       ok(not H.has(buf, row, { conceal_lines = '' }), 'source row ' .. row .. ' revealed')
     end
     ok(H.has(buf, 0, { lines = 2 }, true), 'art still shown')
+    require('markvim.config').setup({})
+    H.cleanup()
+  end)
+  it('runs a renderer postprocessor on the main loop and displays its output', function()
+    require('markvim.diagram').renderers.register({
+      name = 'test-postprocess',
+      kind = 'text',
+      output = 'stdout',
+      available = function()
+        return true
+      end,
+      cmd = function()
+        return { 'cat' }
+      end,
+      post = function()
+        assert(not vim.in_fast_event(), 'renderer callbacks must be able to use Neovim APIs')
+        return { 'tr', '[:lower:]', '[:upper:]' }
+      end,
+    })
+    setup_diagrams({ languages = { fake = { text = { 'test-postprocess' } } } })
+    local buf, s = H.buffer({ 'before', '```fake', 'source', '```', 'after' })
+    ok(
+      vim.wait(2000, function()
+        return H.has(buf, 0, { lines = 1 }, true)
+      end, 20),
+      'postprocessed art rendered'
+    )
+    local marks = vim.api.nvim_buf_get_extmarks(buf, s.views[1].ns_fixed, 0, -1, { details = true })
+    eq('SOURCE', marks[1][4].virt_lines[1][1][1])
     require('markvim.config').setup({})
     H.cleanup()
   end)
