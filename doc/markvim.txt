@@ -22,7 +22,7 @@ markup, HTML comments and diagrams (Mermaid/Pele, PlantUML, D2, Graphviz as
 text art or terminal images). It attaches to every buffer with a configured
 filetype (default `markdown`), which includes LSP hover floats.
 
-Requires Neovim 0.12 with the bundled `markdown` and `markdown_inline`
+Requires Neovim 0.12 or newer with the bundled `markdown` and `markdown_inline`
 treesitter parsers. Highlight groups link to your colorscheme.
 
 ==============================================================================
@@ -54,12 +54,17 @@ split                                                     *markvim-mode-split*
     Toggle rendering for the current buffer.
 
 :Markvim enable | disable
+    Turn rendering on or off for the current buffer.
+
 :Markvim live | preview | split
     Switch mode. `preview` and `split` toggle back to `live` when repeated;
     add `!` to force (`:Markvim! preview`).
 
 :Markvim render
     Force a synchronous re-render of the visible area.
+
+:Markvim open
+    Open the text diagram under the cursor in a floating window.
 
 :Markvim debug
     Print mode, timings of the last render and the marks on the cursor row.
@@ -95,7 +100,7 @@ plugin loads. Both are optional. Defaults: >lua
              language_icon = false, language_pos = 'right', left_pad = 0,
              background = 'buffer', spacing = true, indented = true },
     bullet = { enabled = true, icons = nil, ordered = true },
-    checkbox = { enabled = true, custom = { ['[-]'] = { icon = '󰥔', hl = 'MarkvimTodo' }, ... } },
+    checkbox = { enabled = true }, -- see README for custom states
     quote = { enabled = true },
     callout = { enabled = true },
     table = { enabled = true, style = 'full', pad = true },
@@ -105,8 +110,9 @@ plugin loads. Both are optional. Defaults: >lua
     html = { enabled = true, comments = true },
     diagram = { enabled = true, backend = 'text', hide_source = true,
                 max_height = 40, overflow = 'panel', keys = { open = '<CR>' },
+                panel = 'auto', -- 'auto' | 'float'
                 text = { padding_x = 3, padding_y = 2, box_padding = 0 },
-                timeout = 20000, languages = { ... },
+                timeout = 20000, -- see README for default language renderers
                 cache_dir = nil },
     image = { backend = 'auto', cell = { width = 9, height = 18 } },
     on_attach = nil,
@@ -117,8 +123,13 @@ Notable options:
 heading.icons                                          *markvim-heading.icons*
     `false` (default) hides the `#` markers and shows no icon; `true` uses
     the icon set's heading icons; a list of six strings sets your own.
-    Links and code labels have the same switch: `link.icons` and
-    `code.language_icon` (both off by default).
+    `link.icons` controls icons on links and is off by default.
+
+code.language_icon                                *markvim-code.language_icon*
+    `false` (default) shows the code language label without an icon. Use
+    `true` to pick an installed icon provider, or name one explicitly with
+    `'mini.icons'` or `'nvim-web-devicons'`. A Lua function taking the language
+    name can return a custom icon and an optional highlight group.
 
 heading.position                                    *markvim-heading.position*
     `'inline'` replaces the `#` markers with the icon; `'overlay'` draws the
@@ -163,11 +174,9 @@ revealed while the cursor is inside the block in live mode.
 Art taller than `diagram.max_height` or wider than the window is replaced by
 a one-line placeholder when `diagram.overflow = 'panel'`; `<CR>` on it (or
 on the block, `diagram.keys.open`) and `:Markvim open` show the art in a
-floating panel: a panels.nvim panel (native float, or a Rex layer inside
-Rex) when that plugin is installed, else a plain float (`q` closes). Each
-buffer reuses one panel, labelled `markvim:diagram`; configure it with
-panels.nvim's `groups` option, e.g. `groups = { markvim = { backend =
-'nvim', size = { width = 0.95 } } }`.
+floating panel. With `diagram.panel = 'auto'` (default), markvim uses
+panels.nvim when available and reuses one panel per buffer. Set
+`diagram.panel = 'float'` to always use a built-in Neovim float (`q` closes it).
 `require('markvim').open_diagram({buf}, {row})` does the same from Lua.
 `diagram.text` sets the spacing of beautiful-mermaid art.
 
@@ -183,7 +192,7 @@ Built-in renderers (see `:checkhealth markvim`):
   d2                 d2                                d2
   dot, graphviz      graph-easy                        dot
 
-`pele` is Obsidian's Mermaid renderer (SVG), converted with `rsvg-convert` or
+`pele` renders Mermaid to SVG, which is converted with `rsvg-convert` or
 `magick`. Register your own with
 `require('markvim.diagram').renderers.register(spec)`; see
 `lua/markvim/diagram/renderers.lua` for the spec fields.
@@ -213,7 +222,7 @@ require('markvim').is_attached({buf})                    *markvim.is_attached()*
 require('markvim').mode({buf})                                  *markvim.mode()*
     Mode of an attached buffer ('live', 'preview' or 'split'), or nil.
 require('markvim').open_diagram({buf}, {row})          *markvim.open_diagram()*
-    Open the text diagram at {row} (default: cursor row) in a floating panel.
+    Open the text diagram at zero-based {row} (default: cursor row) in a float.
 
 require('markvim').render_lines({lines}, {opts})        *markvim.render_lines()*
     Put {lines} into a scratch buffer (or `opts.buf`), set
@@ -245,6 +254,7 @@ All groups are defined with `default = true` links and can be overridden:
   MarkvimStrike                @markup.strikethrough.markdown_inline
   MarkvimMath                  @markup.math.markdown_inline
   MarkvimHtml                  Comment
+  MarkvimHardBreak             NonText
   MarkvimDiagram               Normal
   MarkvimDiagramPending        Comment
   MarkvimDiagramError          DiagnosticError

@@ -28,35 +28,38 @@ backgrounds are blended from the heading colors. Nothing is hard-coded.
 - The bundled `markdown` and `markdown_inline` treesitter parsers (ship with
   Neovim). Treesitter highlighting for markdown is on by default in 0.12 and
   markvim builds on its conceals.
-- Optional: a Nerd Font (or set `icons = 'unicode'` / `'ascii'`),
-  `nvim-web-devicons` or `mini.icons` for language icons in code blocks.
-- Optional diagram renderers, see below.
+- A Nerd Font is optional. Set `icons = 'unicode'` or `'ascii'` to use a regular
+  font.
+- Icon providers, diagram renderers, and panels.nvim are optional and installed
+  separately.
 
 ## Install
 
 `vim.pack` (built in):
 
 ```lua
-vim.pack.add({ 'https://github.com/<you>/markvim' })
-require('markvim').setup({})   -- optional
+vim.pack.add({ 'https://github.com/raphaelluethy/markvim' })
 ```
 
 lazy.nvim:
 
 ```lua
-{ '<you>/markvim', ft = 'markdown', opts = {} }
+{ 'raphaelluethy/markvim', ft = 'markdown', opts = {} }
 ```
 
 No `setup()` call is needed. The plugin file only registers a `FileType`
 autocommand and the `:Markvim` command (~0.06 ms at startup); all code loads the
 first time a markdown buffer is shown, and element renderers, the diagram
 pipeline and the image backend load only when they are first needed.
+Open a Markdown file to start in live mode. Use `:Markvim preview` to render
+the cursor line too, or `:Markvim split` to keep the source visible beside it.
 
 ## Usage
 
 | Command | Effect |
 | --- | --- |
 | `:Markvim` / `:Markvim toggle` | toggle rendering for the current buffer |
+| `:Markvim enable` / `:Markvim disable` | turn rendering on or off for the current buffer |
 | `:Markvim live` | live mode (cursor line raw) |
 | `:Markvim preview` | preview mode; again to go back to live |
 | `:Markvim split` | split mode; again (or close the window) to go back |
@@ -65,6 +68,9 @@ pipeline and the image backend load only when they are first needed.
 | `:Markvim debug` | timings of the last render and marks under the cursor |
 | `:Markvim install node` | install the Node based mermaid renderers (`pele`, `beautiful-mermaid`) |
 | `:checkhealth markvim` | parsers, renderers, terminal image support |
+
+Repeat `:Markvim preview` or `:Markvim split` to return to live mode. Use
+`:Markvim! preview` or `:Markvim! split` to force the named mode.
 
 Lua API (`require('markvim')`): `setup(opts)`, `attach(buf)`, `detach(buf)`,
 `enable(buf)`, `disable(buf)`, `toggle(buf)`, `set_mode('live'|'preview'|'split', buf)`,
@@ -105,7 +111,16 @@ require('markvim').setup({
   code = { enabled = true, border = 'hide', language = true, language_icon = false, language_pos = 'right',
            left_pad = 0, background = 'buffer', spacing = true, indented = true },
   bullet = { enabled = true, icons = nil, ordered = true },
-  checkbox = { enabled = true, custom = { ['[-]'] = { icon = '󰥔', hl = 'MarkvimTodo' }, --[[ ... ]] } },
+  checkbox = {
+    enabled = true,
+    custom = {
+      ['[-]'] = { icon = '󰥔', hl = 'MarkvimTodo' },
+      ['[>]'] = { icon = '󰒭', hl = 'MarkvimTodo' },
+      ['[~]'] = { icon = '󰰱', hl = 'MarkvimTodo' },
+      ['[!]'] = { icon = '󰀪', hl = 'MarkvimCalloutWarning' },
+      ['[?]'] = { icon = '󰘥', hl = 'MarkvimCalloutQuestion' },
+    },
+  },
   quote = { enabled = true },
   callout = { enabled = true },
   table = { enabled = true, style = 'full', pad = true },
@@ -119,6 +134,7 @@ require('markvim').setup({
     hide_source = true,      -- show only the rendering; cursor inside reveals the source
     max_height = 40,         -- taller/wider art: see overflow
     overflow = 'panel',      -- 'panel': placeholder + floating panel (<CR>) | 'truncate'
+    panel = 'auto',          -- 'auto': use panels.nvim if installed | 'float': built-in Neovim float
     keys = { open = '<CR>' },-- opens the diagram under the cursor in a panel; false disables
     text = { padding_x = 3, padding_y = 2, box_padding = 0 }, -- beautiful-mermaid spacing
     timeout = 20000,
@@ -142,6 +158,11 @@ require('markvim').setup({
 (Neovim's own query hides fence lines; markvim patches that query at runtime for
 this style).
 
+Set `code.language_icon = true` to use an available icon provider, or set it to
+`'mini.icons'` or `'nvim-web-devicons'` to choose one. With `setup()`, it can also
+be a Lua function that takes a language name and returns an icon and optional
+highlight group. The default, `false`, leaves language labels as text.
+
 ### Highlight groups
 
 All groups are `default` links you can override: `MarkvimH1..6`,
@@ -149,7 +170,7 @@ All groups are `default` links you can override: `MarkvimH1..6`,
 `MarkvimCodeInfo`, `MarkvimCodeBorder`, `MarkvimBullet`, `MarkvimOrdered`,
 `MarkvimChecked`, `MarkvimUnchecked`, `MarkvimTodo`, `MarkvimQuote`,
 `MarkvimRule`, `MarkvimTable`, `MarkvimLink`, `MarkvimUrl`,
-`MarkvimImage`, `MarkvimStrike`, `MarkvimMath`, `MarkvimHtml`,
+`MarkvimImage`, `MarkvimStrike`, `MarkvimMath`, `MarkvimHtml`, `MarkvimHardBreak`,
 `MarkvimDiagram`, `MarkvimDiagramPending`, `MarkvimDiagramError`,
 `MarkvimCallout{Note,Tip,Important,Warning,Caution,Question,Quote}`.
 
@@ -160,10 +181,13 @@ asynchronously by the first available renderer, cached in
 `stdpath('cache')/markvim` and shown as virtual lines in place of the source.
 While a renderer runs, the block is shown as a normal code block with a
 `rendering …` note; errors show the tool's first stderr line.
+Open text art in a floating window with `:Markvim open` or `<CR>`. Set
+`diagram.panel = 'float'` to use Neovim's built-in window even when panels.nvim
+is installed.
 
 | Language | Text renderers | Image renderers |
 | --- | --- | --- |
-| `mermaid`, `pele` | `beautiful-mermaid` (Node, Unicode/ASCII), `mermaid-ascii` | `pele` (Node, Obsidian's Mermaid renderer, SVG → PNG via `rsvg-convert`/`magick`), `mmdc` |
+| `mermaid`, `pele` | `beautiful-mermaid` (Node, Unicode/ASCII), `mermaid-ascii` | `pele` (Node, SVG → PNG via `rsvg-convert` or `magick`), `mmdc` |
 | `plantuml`, `puml` | `plantuml -tutxt` | `plantuml -tpng` |
 | `d2` | `d2 … out.txt` | `d2 … out.png` |
 | `dot`, `graphviz` | `graph-easy --as=boxart` | `dot -Tpng` |
@@ -211,7 +235,7 @@ it on redraw and markvim's debounced render reuses the result.
 
 - `render-markdown.nvim` and `markview.nvim` are mature and feature-rich; both
   render with persistent extmarks and re-render on events. markvim is
-  0.12-only, which lets it use window-scoped namespaces for a copy-free split
+  built for Neovim 0.12+, which lets it use window-scoped namespaces for a copy-free split
   preview, parse inline markup per viewport, and ship a diagram pipeline (text
   *and* images) without a separate image plugin.
 - `snacks.image`/`image.nvim`/`diagram.nvim` render images only; markvim falls
@@ -229,3 +253,11 @@ stylua lua plugin tests bench
 
 `tests/screen.lua` runs a child Neovim with the plugin in a terminal buffer and
 prints the screen as text, which is how the visual behaviour is verified.
+
+## License
+
+Copyright © 2026 Raphael Lüthy. Markvim is licensed under the GNU General
+Public License, version 3 or later (`GPL-3.0-or-later`). See [LICENSE](LICENSE).
+
+The terminal image backend includes the Unicode row and column lookup table
+from the [kitty graphics protocol](https://github.com/kovidgoyal/kitty/blob/a79dd3996ac55e1c89c8cc916e3a598739761455/gen/rowcolumn-diacritics.txt).
