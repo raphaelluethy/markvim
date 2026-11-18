@@ -59,7 +59,8 @@ local defaults = {
     border = 'hide',
     -- Show the language label on code blocks.
     language = true,
-    -- Prefix the label with the devicon (needs nvim-web-devicons or mini.icons).
+    -- false disables icons, true picks an installed provider. A provider name
+    -- ('mini.icons' or 'nvim-web-devicons') or a function selects it explicitly.
     language_icon = false,
     -- 'right' or 'left' placement of the label when border = 'hide'.
     language_pos = 'right',
@@ -134,6 +135,8 @@ local defaults = {
     -- `keys.open` or `:Markvim open`;
     -- 'truncate' shows the first max_height rows inline.
     overflow = 'panel',
+    -- 'auto' uses panels.nvim if available; 'float' uses a built-in float.
+    panel = 'auto',
     -- Normal-mode key (buffer-local in markdown files) that opens the diagram
     -- under the cursor in a panel. false disables.
     keys = { open = '<CR>' },

@@ -36,6 +36,20 @@ describe('code blocks', function()
     eq(0, H.count(buf, 4), 'nothing after the block')
     H.cleanup()
   end)
+  it('uses the code icon provider passed to setup', function()
+    require('markvim').setup({
+      code = {
+        language_icon = function(lang)
+          eq('lua', lang)
+          return 'Lua icon', 'Special'
+        end,
+      },
+    })
+    local buf = H.buffer({ '```lua', 'print(1)', '```' })
+    ok(H.has(buf, 1, { pos = 'right_align', text = 'Lua icon lua' }, true))
+    require('markvim.config').setup({})
+    H.cleanup()
+  end)
   it('hides fences framed by blank lines and skips the background in floats', function()
     local buf = H.buffer({ 'before', '', '```lua', 'print(1)', '```', '', 'after' })
     ok(H.has(buf, 2, { conceal_lines = '' }), 'opening fence hidden')
@@ -335,6 +349,21 @@ describe('diagrams', function()
     ok(p:is_open())
     require('markvim').detach(buf)
     ok(not p:is_valid(), 'closed when markvim detaches')
+
+    setup_diagrams({ max_height = 2, panel = 'float' })
+    buf = H.buffer({ '```fake', 'A', 'B', 'C ' .. vim.uv.hrtime(), '```' })
+    ok(
+      vim.wait(2000, function()
+        return #require('markvim.state').get(buf).diagram_blocks == 1
+      end, 20),
+      'diagram rendered'
+    )
+    ok(require('markvim').open_diagram(buf, 1), 'opens in built-in float')
+    eq(0, #panels.list('markvim:diagram'), 'panels.nvim bypassed')
+    local win = vim.api.nvim_get_current_win()
+    ok(vim.api.nvim_win_get_config(win).relative ~= '', 'opened a floating window')
+    vim.api.nvim_win_close(win, true)
+
     vim.opt.rtp:remove(panels_path)
     package.loaded.panels = nil
     require('markvim.config').setup({})

@@ -412,7 +412,7 @@ function M.render_block(ctx, node, lang, rows)
   return hide
 end
 
----Fallback panel when panels.nvim is not installed: a plain float.
+---Open a plain Neovim float.
 local function fallback_panel(title, lines)
   local buf = api.nvim_create_buf(false, true)
   api.nvim_buf_set_lines(buf, 0, -1, false, lines)
@@ -447,20 +447,22 @@ end
 local function open(buf, s, block)
   local entry = block.entry
   local title = block.lang .. ' diagram'
-  local ok, panels = pcall(require, 'panels')
-  if ok then
-    -- One panel per buffer: opening the same id again updates and shows it.
-    s.panel = panels.open({
-      id = 'markvim:diagram:' .. buf,
-      label = 'markvim:diagram',
-      title = title,
-      lines = entry.lines,
-      wrap = false,
-      focus = true,
-    })
-  else
-    fallback_panel(title, entry.lines)
+  if config.get().diagram.panel ~= 'float' then
+    local ok, panels = pcall(require, 'panels')
+    if ok then
+      -- One panel per buffer: opening the same id again updates and shows it.
+      s.panel = panels.open({
+        id = 'markvim:diagram:' .. buf,
+        label = 'markvim:diagram',
+        title = title,
+        lines = entry.lines,
+        wrap = false,
+        focus = true,
+      })
+      return
+    end
   end
+  fallback_panel(title, entry.lines)
 end
 
 ---Open the diagram at a row (the block itself or its neighbouring rows).

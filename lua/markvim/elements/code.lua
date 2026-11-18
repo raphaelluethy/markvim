@@ -103,7 +103,7 @@ function M.code(ctx, node)
     label = {}
     local icon, ihl
     if cfg.language_icon and ctx.cfg.icons ~= 'ascii' then
-      icon, ihl = require('markvim.icons').language(lang)
+      icon, ihl = require('markvim.icons').language(lang, cfg.language_icon)
     end
     if icon then
       label[#label + 1] = { icon .. ' ', ihl or 'MarkvimCodeInfo' }
