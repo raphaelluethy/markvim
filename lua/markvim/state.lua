@@ -19,6 +19,8 @@
 ---@field parser vim.treesitter.LanguageTree|nil shared markdown parser
 ---@field inline vim.treesitter.LanguageTree|nil private markdown_inline tree for visible regions
 ---@field inline_tick integer|nil
+---@field inline_ranges integer[][]|nil row ranges of the cached inline parse
+---@field inline_trees table<integer, TSTree>|nil cached inline trees
 ---@field split {win: integer, src_win: integer}|nil
 ---@field win_opts table<integer, table> saved window options
 ---@field stats table

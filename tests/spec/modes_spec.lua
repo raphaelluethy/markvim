@@ -41,6 +41,34 @@ describe('live mode', function()
   end)
 end)
 
+describe('inline rendering', function()
+  it('reuses inline trees for the same viewport but refreshes after edits or scrolling', function()
+    local api = vim.api
+    local buf = api.nvim_create_buf(false, true)
+    local lines = { '**bold**' }
+    for i = 2, 60 do
+      lines[i] = ''
+    end
+    lines[61] = '*italic*'
+    api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+    -- Exercise the renderer alone, with no highlighter to parse injections.
+    local s = state.new(buf)
+    local first, last = { { 0, 3 } }, { { 58, 60 } }
+    ok(render._compute(buf, s, first, 80).main[0], 'renders inline markup without the highlighter')
+    eq({}, s.parser:children(), 'renderer only parses the shared block tree')
+    local regions = s.inline:included_regions()
+    ok(render._compute(buf, s, { { 0, 3 } }, 60).main[0], 'inline markup still rendered after a width change')
+    ok(regions == s.inline:included_regions(), 'included regions not rebuilt')
+    local scrolled = render._compute(buf, s, last, 60)
+    ok(scrolled.main[60] and not scrolled.main[0], 'new viewport rendered')
+    -- Keep the byte range identical: only changedtick signals the edit.
+    api.nvim_buf_set_lines(buf, 60, 61, false, { 'plain!!!' })
+    eq(nil, render._compute(buf, s, last, 60).main[60], 'no stale emphasis after an edit')
+    H.cleanup()
+    api.nvim_buf_delete(buf, { force = true })
+  end)
+end)
+
 describe('split mode', function()
   it('opens a scoped preview window on the same buffer', function()
     local buf = H.buffer({ '# Title', '- item', '```lua', 'x', '```' }, { mode = 'live' })

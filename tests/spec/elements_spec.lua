@@ -107,6 +107,19 @@ describe('quotes and callouts', function()
 end)
 
 describe('tables', function()
+  it('leaves a malformed table with a multiline row unstyled and recovers after an edit', function()
+    local buf = H.buffer({
+      '|h|l|',
+      '|---|---|',
+      '|',
+      '-:-:    || a :-:|:-:[a](b) a ',
+    })
+    ok(not H.has(buf, 1, { conceal = '' }), 'malformed table delimiter left raw')
+    vim.api.nvim_buf_set_lines(buf, 2, -1, false, { '| c | d |' })
+    require('markvim').render(buf)
+    ok(H.has(buf, 1, { conceal = '', pos = 'inline' }), 'valid table rendered after the edit')
+    H.cleanup()
+  end)
   it('pads cells, replaces delimiter row and adds borders', function()
     local buf = H.buffer({ '| a | bbb |', '|---|:---:|', '| cc | d |' })
     ok(H.has(buf, 0, { col = 0, end_col = 2, conceal = '', text = '│ ', pos = 'inline' }), 'pipe replaced')

@@ -4,7 +4,12 @@ local M = {}
 ---Boundaries (pipe columns) of a table row. Missing leading/trailing pipes
 ---get virtual boundaries so cells are always `bounds[i]+1 .. bounds[i+1]`.
 local function row_bounds(row_node)
-  local sr, sc, _, ec = row_node:range()
+  local sr, sc, er, ec = row_node:range()
+  -- Error recovery can stitch two source lines into one table row, e.g.
+  -- while a row contains only a pipe. Its columns aren't valid on a single line.
+  if sr ~= er then
+    return
+  end
   local pipes = {}
   for child in row_node:iter_children() do
     if child:type() == '|' then
@@ -68,8 +73,12 @@ end
 ---directly; replaying conceal and inline virtual text keeps emphasis/link
 ---delimiters out while preserving their visible text and icons.
 local function rendered_text(ctx, row, start_col, end_col)
+  local marks = ctx.main[row]
+  if not marks then
+    return ctx.line(row):sub(start_col + 1, end_col)
+  end
   local inserts, concealed = {}, {}
-  for _, mark in ipairs(ctx.main[row] or {}) do
+  for _, mark in ipairs(marks) do
     local col, opts = mark[1], mark[2]
     if opts.virt_text and opts.virt_text_pos == 'inline' and col >= start_col and col <= end_col then
       local parts = inserts[col] or {}
@@ -256,6 +265,9 @@ M['table'] = function(ctx, node)
     local t = child:type()
     if t == 'pipe_table_header' or t == 'pipe_table_row' or t == 'pipe_table_delimiter_row' then
       local sr, bounds, real = row_bounds(child)
+      if not sr then
+        return
+      end
       rows[#rows + 1] = { row = sr, bounds = bounds, real = real, delim = t == 'pipe_table_delimiter_row' }
       if t == 'pipe_table_delimiter_row' then
         local i = 0

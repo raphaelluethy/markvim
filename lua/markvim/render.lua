@@ -220,6 +220,17 @@ local INLINE_REGION_QUERY = '[(inline) (pipe_table_cell)] @region'
 ---markdown_inline tree and return its trees (empty when there are none).
 ---@return table<integer, TSTree>|nil
 local function inline_trees_for(buf, s, root, ranges)
+  local tick = api.nvim_buf_get_changedtick(buf)
+  local lt = s.inline
+  if s.inline_tick == tick and vim.deep_equal(s.inline_ranges, ranges) then
+    return s.inline_trees
+  end
+  if lt and s.inline_tick ~= tick then
+    -- The private tree gets no edit notifications.
+    lt:invalidate()
+  end
+  s.inline_tick, s.inline_ranges, s.inline_trees = tick, ranges, nil
+
   local q = ts.query('markdown', INLINE_REGION_QUERY)
   local regions = {}
   for _, r in ipairs(ranges) do
@@ -252,20 +263,13 @@ local function inline_trees_for(buf, s, root, ranges)
   if #regions == 0 then
     return nil -- never parse with zero regions: that would mean "whole buffer"
   end
-  local lt = s.inline
   if not lt then
     lt = require('vim.treesitter.languagetree').new(buf, 'markdown_inline', { injections = { markdown_inline = '' } })
     s.inline = lt
   end
   lt:set_included_regions(regions)
-  local tick = api.nvim_buf_get_changedtick(buf)
-  if s.inline_tick ~= tick then
-    -- The private tree gets no edit notifications; re-parse after changes.
-    lt:invalidate()
-    s.inline_tick = tick
-  end
-  lt:parse(true)
-  return lt:trees()
+  s.inline_trees = lt:parse(true)
+  return s.inline_trees
 end
 
 -- Compute -------------------------------------------------------------------
@@ -289,14 +293,11 @@ local function compute(buf, s, ranges, width)
   local ctx = new_ctx(buf, s, cfg, width)
   local block_q, inline_q = queries(cfg)
 
-  local ts_ranges = {}
-  for i, r in ipairs(ranges) do
-    ts_ranges[i] = { r[1], 0, r[2] + 1, 0 }
-  end
   local phases = {}
   ctx.phases = phases
   local t0 = util.now()
-  local trees = parser:parse(ts_ranges)
+  -- Only the block tree is needed here. Leave injections to the highlighter.
+  local trees = parser:parse()
   local root = trees and trees[1] and trees[1]:root()
   if not root then
     return nil

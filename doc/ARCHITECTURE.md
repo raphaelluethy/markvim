@@ -54,14 +54,15 @@ trees. markvim therefore parses inline markup with a **private**
 `markdown_inline` LanguageTree whose included regions are exactly the
 `inline`/`pipe_table_cell` nodes in the viewport (minus their named children,
 like the injection machinery does). The tree receives no edit notifications,
-so it is invalidated when the buffer's changedtick changes; re-parsing ~60
-tiny regions costs ~0.2–0.7 ms.
+so it is invalidated when the buffer's changedtick changes. A forced render at
+the same viewport (e.g. after a width change) reuses the inline trees without
+rediscovering regions.
 
-The shared markdown (block) parser is reused: `parser:parse(ranges)` is free
-when the highlighter already parsed for the redraw. tree-sitter-markdown's
-incremental re-parse after an edit is poor (it re-parses from the edit to the
-end of the document: ~40–130 ms at 17k lines) — that cost belongs to Neovim's
-highlighter and is not something a plugin can avoid.
+The shared markdown (block) tree is reused through `parser:parse()`. With no
+range argument it only parses the root and leaves injections to Neovim's
+highlighter; if the root is already valid no reparse is needed.
+tree-sitter-markdown's block reparse after an edit can still dominate total
+latency in large documents.
 
 Neovim's bundled markdown highlight query already conceals inline delimiters,
 link syntax and (with `conceal_lines`) fence lines. markvim re-emits the
